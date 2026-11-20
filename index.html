@@ -1,1 +1,2736 @@
+<!DOCTYPE html>
+<html lang="id">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>SMART EXAM SCANNER – Aplikasi Koreksi Ujian Otomatis</title>
+    <!-- Tailwind CSS -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    <!-- Font Inter -->
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&display=swap" rel="stylesheet">
+    <!-- Lucide Icons -->
+    <script src="https://unpkg.com/lucide@latest"></script>
+    <!-- Chart.js untuk Grafik -->
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    <!-- SheetJS (XLSX) untuk Impor/Ekspor Excel -->
+    <script src="https://cdn.sheetjs.com/xlsx-0.20.1/package/dist/xlsx.full.min.js"></script>
+    <!-- jsPDF & html2canvas untuk Cetak/Unduh PDF -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/html2canvas/1.4.1/html2canvas.min.js"></script>
+    <!-- PDF.js untuk membaca file PDF saat Batch Upload -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js"></script>
+    <!-- QRCode.js & jsQR untuk Kode Unik LJK -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/qrcodejs/1.0.0/qrcode.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/jsqr@1.4.0/dist/jsQR.min.js"></script>
 
+    <style>
+        body {
+            font-family: 'Inter', sans-serif;
+            background-color: #f8fafc;
+            color: #0f172a;
+        }
+        /* Custom Scrollbar */
+        ::-webkit-scrollbar { width: 6px; height: 6px; }
+        ::-webkit-scrollbar-track { background: #f1f5f9; }
+        ::-webkit-scrollbar-thumb { background: #cbd5e1; border-radius: 9999px; }
+        ::-webkit-scrollbar-thumb:hover { background: #94a3b8; }
+
+        /* A4 Print & LJK Styling */
+        .ljk-sheet {
+            width: 210mm;
+            min-height: 297mm;
+            background: #ffffff;
+            color: #000000;
+            position: relative;
+            box-sizing: border-box;
+            padding: 12mm;
+            margin: 0 auto;
+            border: 1px solid #e2e8f0;
+        }
+        .marker {
+            width: 8mm;
+            height: 8mm;
+            background: #000000;
+            position: absolute;
+        }
+        .marker-tl { top: 8mm; left: 8mm; }
+        .marker-tr { top: 8mm; right: 8mm; }
+        .marker-bl { bottom: 8mm; left: 8mm; }
+        .marker-br { bottom: 8mm; right: 8mm; }
+
+        .omr-bubble {
+            width: 18px;
+            height: 18px;
+            border: 1.5px solid #000;
+            border-radius: 50%;
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 10px;
+            font-weight: 700;
+            color: #000;
+            user-select: none;
+        }
+        .omr-bubble.filled {
+            background-color: #000000;
+            color: #000000;
+        }
+
+        @media print {
+            body * { visibility: hidden; }
+            #print-area, #print-area * { visibility: visible; }
+            #print-area {
+                position: absolute;
+                left: 0;
+                top: 0;
+                width: 100%;
+                margin: 0;
+                padding: 0;
+            }
+            .no-print { display: none !important; }
+        }
+    </style>
+</head>
+<body class="antialiased selection:bg-blue-600 selection:text-white">
+
+    <!-- Toast Notification Container -->
+    <div id="toast-container" class="fixed top-4 right-4 z-50 flex flex-col gap-2 max-w-sm w-full pointer-events-none"></div>
+
+    <!-- Custom Modal Container -->
+    <div id="modal-backdrop" class="fixed inset-0 bg-slate-900/60 backdrop-blur-sm z-40 hidden items-center justify-center p-4">
+        <div id="modal-content" class="bg-white rounded-2xl shadow-2xl max-w-2xl w-full max-h-[90vh] overflow-y-auto p-6 border border-slate-200">
+            <!-- Dynamic modal content -->
+        </div>
+    </div>
+
+    <div class="flex h-screen overflow-hidden">
+        <!-- Mobile Sidebar Backdrop -->
+        <div id="sidebar-overlay" onclick="toggleSidebar()" class="fixed inset-0 bg-slate-900/50 z-20 hidden lg:hidden"></div>
+
+        <!-- Sidebar Navigation -->
+        <aside id="sidebar" class="fixed lg:static inset-y-0 left-0 z-30 w-68 bg-slate-900 text-slate-300 flex flex-col transition-transform duration-300 -translate-x-full lg:translate-x-0 border-r border-slate-800">
+            <!-- Brand -->
+            <div class="p-5 flex items-center gap-3 border-b border-slate-800">
+                <div class="w-10 h-10 rounded-xl bg-blue-600 flex items-center justify-center text-white shadow-lg shadow-blue-600/30 shrink-0">
+                    <i data-lucide="scan-line" class="w-6 h-6"></i>
+                </div>
+                <div>
+                    <h1 class="text-white font-bold text-base tracking-tight leading-tight">SMART EXAM</h1>
+                    <p class="text-[11px] text-blue-400 font-semibold tracking-wider">AI & OMR SCANNER</p>
+                </div>
+            </div>
+
+            <!-- Active Exam Selector Pill -->
+            <div class="p-4 border-b border-slate-800/80 bg-slate-800/40">
+                <label class="text-[10px] uppercase tracking-wider font-semibold text-slate-400 block mb-1.5">Ujian Aktif Saat Ini</label>
+                <select id="global-exam-select" onchange="switchActiveExam(this.value)" class="w-full bg-slate-800 text-white text-xs rounded-lg px-3 py-2 border border-slate-700 focus:outline-none focus:border-blue-500">
+                    <!-- Populated by JS -->
+                </select>
+            </div>
+
+            <!-- Menu Links -->
+            <nav class="flex-1 overflow-y-auto p-3 space-y-1">
+                <button onclick="navigate('dashboard')" data-nav="dashboard" class="nav-btn w-full flex items-center gap-3 px-3.5 py-2.5 rounded-xl text-sm font-medium transition-all">
+                    <i data-lucide="layout-dashboard" class="w-4 h-4"></i>
+                    <span>1. Dashboard</span>
+                </button>
+                <button onclick="navigate('create-exam')" data-nav="create-exam" class="nav-btn w-full flex items-center gap-3 px-3.5 py-2.5 rounded-xl text-sm font-medium transition-all">
+                    <i data-lucide="file-plus-2" class="w-4 h-4"></i>
+                    <span>2. Buat Ujian & LJK</span>
+                </button>
+                <button onclick="navigate('answer-key')" data-nav="answer-key" class="nav-btn w-full flex items-center gap-3 px-3.5 py-2.5 rounded-xl text-sm font-medium transition-all">
+                    <i data-lucide="key-round" class="w-4 h-4"></i>
+                    <span>3. Kunci Jawaban</span>
+                </button>
+                <button onclick="navigate('scanner')" data-nav="scanner" class="nav-btn w-full flex items-center gap-3 px-3.5 py-2.5 rounded-xl text-sm font-medium transition-all">
+                    <i data-lucide="camera" class="w-4 h-4"></i>
+                    <span>4. Scanner LJK</span>
+                    <span class="ml-auto text-[10px] bg-blue-600 text-white px-2 py-0.5 rounded-full font-semibold">OMR/AI</span>
+                </button>
+                <button onclick="navigate('results')" data-nav="results" class="nav-btn w-full flex items-center gap-3 px-3.5 py-2.5 rounded-xl text-sm font-medium transition-all">
+                    <i data-lucide="check-circle-2" class="w-4 h-4"></i>
+                    <span>5. Hasil Koreksi</span>
+                    <span id="badge-verify" class="ml-auto hidden text-[10px] bg-amber-500 text-slate-900 px-2 py-0.5 rounded-full font-bold">0</span>
+                </button>
+                <button onclick="navigate('analytics')" data-nav="analytics" class="nav-btn w-full flex items-center gap-3 px-3.5 py-2.5 rounded-xl text-sm font-medium transition-all">
+                    <i data-lucide="bar-chart-3" class="w-4 h-4"></i>
+                    <span>6. Rekap Nilai & Analisis</span>
+                </button>
+                <button onclick="navigate('settings')" data-nav="settings" class="nav-btn w-full flex items-center gap-3 px-3.5 py-2.5 rounded-xl text-sm font-medium transition-all">
+                    <i data-lucide="settings" class="w-4 h-4"></i>
+                    <span>7. Pengaturan & Data</span>
+                </button>
+            </nav>
+
+            <!-- Storage Indicator -->
+            <div class="p-4 border-t border-slate-800 text-xs text-slate-400">
+                <div class="flex items-center justify-between mb-1">
+                    <span class="flex items-center gap-1.5"><span class="w-2 h-2 rounded-full bg-emerald-400 animate-pulse"></span> Database Lokal Aktif</span>
+                    <span id="db-count" class="font-mono text-slate-300">0 LJK</span>
+                </div>
+                <p class="text-[11px] text-slate-500">Data tersimpan permanen di perangkat.</p>
+            </div>
+        </aside>
+
+        <!-- Main Content Wrapper -->
+        <div class="flex-1 flex flex-col min-w-0 overflow-hidden">
+            <!-- Top Header -->
+            <header class="bg-white border-b border-slate-200 px-4 lg:px-8 py-3.5 flex items-center justify-between gap-4 shrink-0">
+                <div class="flex items-center gap-3">
+                    <button onclick="toggleSidebar()" class="lg:hidden p-2 rounded-lg text-slate-600 hover:bg-slate-100">
+                        <i data-lucide="menu" class="w-5 h-5"></i>
+                    </button>
+                    <div>
+                        <h2 id="page-title" class="text-lg font-bold text-slate-800">Dashboard Utama</h2>
+                        <p id="page-subtitle" class="text-xs text-slate-500 hidden sm:block">Ringkasan statistik penilaian dan pemindaian lembar jawaban otomatis</p>
+                    </div>
+                </div>
+                <div class="flex items-center gap-2 sm:gap-3">
+                    <button onclick="generateSampleDemoData()" class="text-xs bg-slate-100 hover:bg-slate-200 text-slate-700 font-medium px-3 py-2 rounded-xl transition flex items-center gap-1.5" title="Muat contoh ujian & hasil siswa untuk uji coba">
+                        <i data-lucide="sparkles" class="w-3.5 h-3.5 text-blue-600"></i>
+                        <span class="hidden sm:inline">Muat Data Demo</span>
+                    </button>
+                    <button onclick="navigate('scanner')" class="text-xs bg-blue-600 hover:bg-blue-700 text-white font-semibold px-3.5 py-2 rounded-xl shadow-sm shadow-blue-600/20 transition flex items-center gap-1.5">
+                        <i data-lucide="scan" class="w-3.5 h-3.5"></i>
+                        <span>Mulai Scan</span>
+                    </button>
+                </div>
+            </header>
+
+            <!-- Scrollable Page Content -->
+            <main id="main-content" class="flex-1 overflow-y-auto p-4 lg:p-8">
+                <!-- Views injected here -->
+            </main>
+        </div>
+    </div>
+
+    <!-- Hidden Print Container -->
+    <div id="print-area" class="hidden"></div>
+
+    <script>
+        // ============================================================================
+        // 1. STATE & INDEXEDDB PERSISTENT STORAGE ENGINE
+        // ============================================================================
+        pdfjsLib.GlobalWorkerOptions.workerSrc = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js';
+
+        const DB_NAME = 'SmartExamScannerDB';
+        const DB_VERSION = 1;
+        let dbInstance = null;
+
+        let AppState = {
+            currentRoute: 'dashboard',
+            activeExamId: null,
+            exams: [],
+            results: [], // { id, examId, sheetUid, studentName, studentClass, studentNumber, answers: [], statuses: [], score, pointsEarned, maxPoints, correctCount, wrongCount, emptyCount, doubleCount, needsVerification, scannedAt, imageDataUrl }
+            settings: {
+                kkm: 75,
+                omrThreshold: 0.38, // Ambang kehitaman bulatan (0.1 - 0.8)
+                omrAmbiguityMargin: 0.12, // Selisih minimum untuk membedakan jawaban yakin vs ragu
+                geminiApiKey: '',
+                useAiVisionForIdentity: false
+            }
+        };
+
+        // Inisialisasi IndexedDB agar penyimpanan permanen & tahan kapasitas gambar besar
+        function initDB() {
+            return new Promise((resolve, reject) => {
+                const request = indexedDB.open(DB_NAME, DB_VERSION);
+                request.onupgradeneeded = (e) => {
+                    const db = e.target.result;
+                    if (!db.objectStoreNames.contains('state')) {
+                        db.createObjectStore('state');
+                    }
+                };
+                request.onsuccess = (e) => {
+                    dbInstance = e.target.result;
+                    resolve(dbInstance);
+                };
+                request.onerror = (e) => reject(e);
+            });
+        }
+
+        async function saveState() {
+            try {
+                if (!dbInstance) await initDB();
+                const tx = dbInstance.transaction('state', 'readwrite');
+                const store = tx.objectStore('state');
+                store.put({
+                    activeExamId: AppState.activeExamId,
+                    exams: AppState.exams,
+                    results: AppState.results,
+                    settings: AppState.settings
+                }, 'appData');
+                updateHeaderAndBadges();
+            } catch (err) {
+                console.error('Gagal menyimpan database:', err);
+            }
+        }
+
+        async function loadState() {
+            try {
+                if (!dbInstance) await initDB();
+                return new Promise((resolve) => {
+                    const tx = dbInstance.transaction('state', 'readonly');
+                    const store = tx.objectStore('state');
+                    const req = store.get('appData');
+                    req.onsuccess = () => {
+                        if (req.result) {
+                            AppState.activeExamId = req.result.activeExamId;
+                            AppState.exams = req.result.exams || [];
+                            AppState.results = req.result.results || [];
+                            AppState.settings = { ...AppState.settings, ...(req.result.settings || {}) };
+                        }
+                        resolve();
+                    };
+                    req.onerror = () => resolve();
+                });
+            } catch (err) {
+                console.error('Gagal memuat database:', err);
+            }
+        }
+
+        // ============================================================================
+        // 2. UTILITY & NOTIFICATION HELPERS
+        // ============================================================================
+        function showToast(title, message, type = 'success') {
+            const container = document.getElementById('toast-container');
+            const colors = {
+                success: 'bg-emerald-600 text-white border-emerald-700',
+                error: 'bg-rose-600 text-white border-rose-700',
+                warning: 'bg-amber-500 text-slate-950 border-amber-600',
+                info: 'bg-blue-600 text-white border-blue-700'
+            };
+            const icons = {
+                success: 'check-circle',
+                error: 'alert-circle',
+                warning: 'alert-triangle',
+                info: 'info'
+            };
+            const toast = document.createElement('div');
+            toast.className = `pointer-events-auto flex items-start gap-3 p-3.5 rounded-xl shadow-lg border ${colors[type]} transition-all duration-300 transform translate-y-0 opacity-100`;
+            toast.innerHTML = `
+                <i data-lucide="${icons[type]}" class="w-5 h-5 shrink-0 mt-0.5"></i>
+                <div class="flex-1 text-xs">
+                    <p class="font-bold text-sm">${title}</p>
+                    <p class="opacity-90 mt-0.5">${message}</p>
+                </div>
+            `;
+            container.appendChild(toast);
+            lucide.createIcons();
+            setTimeout(() => {
+                toast.classList.add('opacity-0', 'translate-x-4');
+                setTimeout(() => toast.remove(), 300);
+            }, 4000);
+        }
+
+        function openModal(htmlContent) {
+            const backdrop = document.getElementById('modal-backdrop');
+            const content = document.getElementById('modal-content');
+            content.innerHTML = htmlContent;
+            backdrop.classList.remove('hidden');
+            backdrop.classList.add('flex');
+            lucide.createIcons();
+        }
+
+        function closeModal() {
+            const backdrop = document.getElementById('modal-backdrop');
+            backdrop.classList.add('hidden');
+            backdrop.classList.remove('flex');
+        }
+
+        function toggleSidebar() {
+            const sidebar = document.getElementById('sidebar');
+            const overlay = document.getElementById('sidebar-overlay');
+            sidebar.classList.toggle('-translate-x-full');
+            overlay.classList.toggle('hidden');
+        }
+
+        function getActiveExam() {
+            if (!AppState.exams.length) return null;
+            let exam = AppState.exams.find(e => e.id === AppState.activeExamId);
+            if (!exam) {
+                exam = AppState.exams[0];
+                AppState.activeExamId = exam.id;
+            }
+            return exam;
+        }
+
+        function switchActiveExam(examId) {
+            AppState.activeExamId = examId;
+            saveState();
+            renderCurrentRoute();
+            showToast('Ujian Aktif Diganti', 'Menampilkan data untuk ujian yang dipilih.', 'info');
+        }
+
+        function updateHeaderAndBadges() {
+            const select = document.getElementById('global-exam-select');
+            if (AppState.exams.length === 0) {
+                select.innerHTML = `<option value="">-- Belum Ada Ujian --</option>`;
+            } else {
+                select.innerHTML = AppState.exams.map(e =>
+                    `<option value="${e.id}" ${e.id === AppState.activeExamId ? 'selected' : ''}>${e.examName} (${e.subject} - ${e.className})</option>`
+                ).join('');
+            }
+
+            document.getElementById('db-count').textContent = `${AppState.results.length} LJK`;
+
+            const activeExam = getActiveExam();
+            const unverifiedCount = activeExam
+                ? AppState.results.filter(r => r.examId === activeExam.id && r.needsVerification).length
+                : 0;
+            const badge = document.getElementById('badge-verify');
+            if (unverifiedCount > 0) {
+                badge.textContent = unverifiedCount;
+                badge.classList.remove('hidden');
+            } else {
+                badge.classList.add('hidden');
+            }
+        }
+
+        // ============================================================================
+        // 3. DATA DEMO & INISIALISASI AWAL
+        // ============================================================================
+        function createDefaultExamIfEmpty() {
+            if (AppState.exams.length > 0) return;
+            const defaultExam = {
+                id: 'EXAM-' + Date.now(),
+                schoolName: 'SMP NEGERI 1 NUSANTARA',
+                subject: 'Ilmu Pengetahuan Alam (IPA)',
+                className: 'VIII-A',
+                teacherName: 'Budi Santoso, S.Pd.',
+                examName: 'Penilaian Tengah Semester (PTS) Ganjil',
+                examDate: new Date().toISOString().split('T')[0],
+                questionCount: 20,
+                answerKey: Array.from({ length: 20 }, (_, i) => ({
+                    no: i + 1,
+                    answer: ['A', 'B', 'C', 'D'][i % 4],
+                    points: i < 10 ? 4 : 6 // Total 100 point (10x4 + 10x6)
+                }))
+            };
+            AppState.exams.push(defaultExam);
+            AppState.activeExamId = defaultExam.id;
+            saveState();
+        }
+
+        function generateSampleDemoData() {
+            const exam = getActiveExam();
+            if (!exam) return;
+
+            const sampleStudents = [
+                { name: 'Ahmad Fauzi', cls: exam.className, num: '08-001', acc: 0.90 },
+                { name: 'Siti Nurhaliza', cls: exam.className, num: '08-002', acc: 0.85 },
+                { name: 'Dimas Pratama', cls: exam.className, num: '08-003', acc: 0.65 },
+                { name: 'Putri Ayu Lestari', cls: exam.className, num: '08-004', acc: 0.95 },
+                { name: 'Rizky Ramadhan', cls: exam.className, num: '08-005', acc: 0.55 },
+                { name: 'Nabila Zahra', cls: exam.className, num: '08-006', acc: 0.80 }
+            ];
+
+            let added = 0;
+            sampleStudents.forEach((st, idx) => {
+                const uid = `${exam.id}-DEMO-${st.num}`;
+                if (AppState.results.some(r => r.sheetUid === uid)) return;
+
+                const answers = [];
+                const statuses = [];
+                exam.answerKey.forEach((k, qIdx) => {
+                    if (idx === 2 && qIdx === 4) {
+                        answers.push('DOUBLE');
+                        statuses.push('DOUBLE');
+                    } else if (idx === 4 && qIdx === 7) {
+                        answers.push('');
+                        statuses.push('EMPTY');
+                    } else if (Math.random() < st.acc) {
+                        answers.push(k.answer);
+                        statuses.push('OK');
+                    } else {
+                        const wrongOpts = ['A', 'B', 'C', 'D'].filter(o => o !== k.answer);
+                        answers.push(wrongOpts[Math.floor(Math.random() * 3)]);
+                        statuses.push('OK');
+                    }
+                });
+
+                const graded = gradeStudentAnswers(exam, answers, statuses);
+                AppState.results.push({
+                    id: 'RES-' + Date.now() + '-' + idx,
+                    examId: exam.id,
+                    sheetUid: uid,
+                    studentName: st.name,
+                    studentClass: st.cls,
+                    studentNumber: st.num,
+                    ...graded,
+                    scannedAt: new Date().toLocaleString('id-ID'),
+                    imageDataUrl: null
+                });
+                added++;
+            });
+
+            saveState();
+            renderCurrentRoute();
+            if (added > 0) {
+                showToast('Data Demo Dimuat', `${added} hasil koreksi siswa berhasil ditambahkan untuk simulasi.`, 'success');
+            } else {
+                showToast('Data Demo Sudah Ada', 'Data simulasi untuk ujian ini sudah dimuat sebelumnya.', 'info');
+            }
+        }
+
+        // ============================================================================
+        // 4. LOGIKA PENILAIAN (GRADING ENGINE)
+        // ============================================================================
+        function gradeStudentAnswers(exam, studentAnswers, statuses) {
+            let correctCount = 0;
+            let wrongCount = 0;
+            let emptyCount = 0;
+            let doubleCount = 0;
+            let pointsEarned = 0;
+            let maxPoints = 0;
+            let needsVerification = false;
+
+            exam.answerKey.forEach((keyItem, index) => {
+                const pt = Number(keyItem.points) || 0;
+                maxPoints += pt;
+                const ans = studentAnswers[index] || '';
+                const st = statuses[index] || 'OK';
+
+                if (st === 'VERIFY' || st === 'DOUBLE') {
+                    needsVerification = true;
+                }
+
+                if (st === 'DOUBLE' || ans === 'DOUBLE') {
+                    doubleCount++;
+                } else if (!ans || ans === 'EMPTY') {
+                    emptyCount++;
+                } else if (ans === keyItem.answer) {
+                    correctCount++;
+                    pointsEarned += pt;
+                } else {
+                    wrongCount++;
+                }
+            });
+
+            const score = maxPoints > 0 ? Number(((pointsEarned / maxPoints) * 100).toFixed(2)) : 0;
+
+            return {
+                answers: studentAnswers,
+                statuses,
+                correctCount,
+                wrongCount,
+                emptyCount,
+                doubleCount,
+                pointsEarned,
+                maxPoints,
+                score,
+                needsVerification
+            };
+        }
+
+        // ============================================================================
+        // 5. ROUTING & NAVIGATION
+        // ============================================================================
+        const routeMeta = {
+            'dashboard': { title: 'Dashboard Utama', subtitle: 'Ringkasan statistik penilaian dan pemindaian lembar jawaban otomatis' },
+            'create-exam': { title: 'Buat Ujian & Cetak LJK', subtitle: 'Konfigurasi identitas ujian dan cetak Lembar Jawaban Komputer (LJK) format A4' },
+            'answer-key': { title: 'Kunci Jawaban & Bobot Point', subtitle: 'Atur kunci jawaban A, B, C, D dan bobot nilai per nomor soal' },
+            'scanner': { title: 'Scanner LJK Otomatis (OMR & AI)', subtitle: 'Pindai melalui kamera langsung, unggah foto, atau pemindaian massal (Batch)' },
+            'results': { title: 'Hasil Koreksi & Verifikasi', subtitle: 'Daftar nilai siswa, koreksi manual jika ragu, dan perbandingan jawaban' },
+            'analytics': { title: 'Rekap Nilai & Analisis Butir Soal', subtitle: 'Statistik ketuntasan belajar, analisis tingkat kesukaran soal, dan ekspor Excel/PDF' },
+            'settings': { title: 'Pengaturan Sistem & Backup Data', subtitle: 'Kalibrasi sensor OMR, integrasi AI Vision, dan cadangkan database' }
+        };
+
+        function navigate(route) {
+            AppState.currentRoute = route;
+            document.querySelectorAll('.nav-btn').forEach(btn => {
+                if (btn.dataset.nav === route) {
+                    btn.classList.add('bg-blue-600', 'text-white', 'shadow-md', 'shadow-blue-600/20');
+                    btn.classList.remove('text-slate-300', 'hover:bg-slate-800', 'hover:text-white');
+                } else {
+                    btn.classList.remove('bg-blue-600', 'text-white', 'shadow-md', 'shadow-blue-600/20');
+                    btn.classList.add('text-slate-300', 'hover:bg-slate-800', 'hover:text-white');
+                }
+            });
+
+            document.getElementById('page-title').textContent = routeMeta[route].title;
+            document.getElementById('page-subtitle').textContent = routeMeta[route].subtitle;
+
+            // Close mobile sidebar if open
+            const sidebar = document.getElementById('sidebar');
+            if (!sidebar.classList.contains('-translate-x-full') && window.innerWidth < 1024) {
+                toggleSidebar();
+            }
+
+            renderCurrentRoute();
+        }
+
+        function renderCurrentRoute() {
+            const container = document.getElementById('main-content');
+            switch (AppState.currentRoute) {
+                case 'dashboard': renderDashboard(container); break;
+                case 'create-exam': renderCreateExam(container); break;
+                case 'answer-key': renderAnswerKey(container); break;
+                case 'scanner': renderScanner(container); break;
+                case 'results': renderResults(container); break;
+                case 'analytics': renderAnalytics(container); break;
+                case 'settings': renderSettings(container); break;
+            }
+            lucide.createIcons();
+        }
+
+        // ============================================================================
+        // 6. VIEW 1: DASHBOARD UTAMA
+        // ============================================================================
+        let dashboardChartInstance = null;
+
+        function renderDashboard(container) {
+            const totalExams = AppState.exams.length;
+            const totalScanned = AppState.results.length;
+            const uniqueStudents = new Set(AppState.results.map(r => `${r.studentName}-${r.studentNumber}`)).size;
+
+            const activeExam = getActiveExam();
+            const examResults = activeExam ? AppState.results.filter(r => r.examId === activeExam.id) : [];
+
+            const scores = examResults.map(r => r.score);
+            const avgScore = scores.length ? (scores.reduce((a, b) => a + b, 0) / scores.length).toFixed(1) : '0.0';
+            const maxScore = scores.length ? Math.max(...scores).toFixed(1) : '0.0';
+            const minScore = scores.length ? Math.min(...scores).toFixed(1) : '0.0';
+
+            container.innerHTML = `
+                <div class="space-y-6">
+                    <!-- Stat Cards -->
+                    <div class="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-5 gap-4">
+                        <div class="bg-white p-5 rounded-2xl border border-slate-200/80 shadow-sm">
+                            <div class="flex items-center justify-between">
+                                <span class="text-xs font-semibold text-slate-500 uppercase">Total Ujian</span>
+                                <div class="w-9 h-9 rounded-xl bg-blue-50 text-blue-600 flex items-center justify-center"><i data-lucide="book-open" class="w-4 h-4"></i></div>
+                            </div>
+                            <p class="text-2xl font-extrabold text-slate-800 mt-3">${totalExams}</p>
+                            <p class="text-xs text-slate-400 mt-1">Paket ujian tersimpan</p>
+                        </div>
+
+                        <div class="bg-white p-5 rounded-2xl border border-slate-200/80 shadow-sm">
+                            <div class="flex items-center justify-between">
+                                <span class="text-xs font-semibold text-slate-500 uppercase">LJK Dipindai</span>
+                                <div class="w-9 h-9 rounded-xl bg-indigo-50 text-indigo-600 flex items-center justify-center"><i data-lucide="files" class="w-4 h-4"></i></div>
+                            </div>
+                            <p class="text-2xl font-extrabold text-slate-800 mt-3">${totalScanned}</p>
+                            <p class="text-xs text-slate-400 mt-1">${uniqueStudents} siswa unik diperiksa</p>
+                        </div>
+
+                        <div class="bg-white p-5 rounded-2xl border border-slate-200/80 shadow-sm">
+                            <div class="flex items-center justify-between">
+                                <span class="text-xs font-semibold text-slate-500 uppercase">Rata-Rata Nilai</span>
+                                <div class="w-9 h-9 rounded-xl bg-emerald-50 text-emerald-600 flex items-center justify-center"><i data-lucide="trending-up" class="w-4 h-4"></i></div>
+                            </div>
+                            <p class="text-2xl font-extrabold text-slate-800 mt-3">${avgScore}</p>
+                            <p class="text-xs text-slate-400 mt-1">Ujian aktif saat ini</p>
+                        </div>
+
+                        <div class="bg-white p-5 rounded-2xl border border-slate-200/80 shadow-sm">
+                            <div class="flex items-center justify-between">
+                                <span class="text-xs font-semibold text-slate-500 uppercase">Nilai Tertinggi</span>
+                                <div class="w-9 h-9 rounded-xl bg-amber-50 text-amber-600 flex items-center justify-center"><i data-lucide="award" class="w-4 h-4"></i></div>
+                            </div>
+                            <p class="text-2xl font-extrabold text-emerald-600 mt-3">${maxScore}</p>
+                            <p class="text-xs text-slate-400 mt-1">Skor maksimal diraih</p>
+                        </div>
+
+                        <div class="bg-white p-5 rounded-2xl border border-slate-200/80 shadow-sm">
+                            <div class="flex items-center justify-between">
+                                <span class="text-xs font-semibold text-slate-500 uppercase">Nilai Terendah</span>
+                                <div class="w-9 h-9 rounded-xl bg-rose-50 text-rose-600 flex items-center justify-center"><i data-lucide="arrow-down-circle" class="w-4 h-4"></i></div>
+                            </div>
+                            <p class="text-2xl font-extrabold text-rose-600 mt-3">${minScore}</p>
+                            <p class="text-xs text-slate-400 mt-1">Perlu perhatian/remedial</p>
+                        </div>
+                    </div>
+
+                    <!-- Chart & Quick Workflow -->
+                    <div class="grid grid-cols-1 lg:grid-cols-3 gap-6">
+                        <!-- Distribusi Nilai -->
+                        <div class="lg:col-span-2 bg-white p-6 rounded-2xl border border-slate-200/80 shadow-sm">
+                            <div class="flex items-center justify-between mb-4">
+                                <div>
+                                    <h3 class="font-bold text-slate-800">Grafik Distribusi Nilai Siswa</h3>
+                                    <p class="text-xs text-slate-500">${activeExam ? `${activeExam.examName} – ${activeExam.subject}` : 'Belum ada ujian'}</p>
+                                </div>
+                                <span class="text-xs font-medium bg-blue-50 text-blue-700 px-3 py-1 rounded-full">${examResults.length} Siswa</span>
+                            </div>
+                            <div class="h-64 w-full">
+                                <canvas id="dashboardScoreChart"></canvas>
+                            </div>
+                        </div>
+
+                        <!-- Alur Penggunaan Cepat -->
+                        <div class="bg-white p-6 rounded-2xl border border-slate-200/80 shadow-sm flex flex-col justify-between">
+                            <div>
+                                <h3 class="font-bold text-slate-800 mb-1">Alur Kerja Koreksi Cepat</h3>
+                                <p class="text-xs text-slate-500 mb-4">Ikuti 4 langkah mudah mengoreksi LJK</p>
+                                <div class="space-y-3">
+                                    <div onclick="navigate('create-exam')" class="cursor-pointer p-3 rounded-xl border border-slate-200 hover:border-blue-400 hover:bg-blue-50/40 transition flex items-center gap-3">
+                                        <span class="w-7 h-7 rounded-lg bg-blue-600 text-white font-bold text-xs flex items-center justify-center shrink-0">1</span>
+                                        <div>
+                                            <p class="text-xs font-bold text-slate-800">Buat Ujian & Cetak LJK</p>
+                                            <p class="text-[11px] text-slate-500">Atur identitas & unduh LJK A4</p>
+                                        </div>
+                                    </div>
+                                    <div onclick="navigate('answer-key')" class="cursor-pointer p-3 rounded-xl border border-slate-200 hover:border-blue-400 hover:bg-blue-50/40 transition flex items-center gap-3">
+                                        <span class="w-7 h-7 rounded-lg bg-blue-600 text-white font-bold text-xs flex items-center justify-center shrink-0">2</span>
+                                        <div>
+                                            <p class="text-xs font-bold text-slate-800">Input Kunci & Bobot Point</p>
+                                            <p class="text-[11px] text-slate-500">Bisa berbeda tiap nomor soal</p>
+                                        </div>
+                                    </div>
+                                    <div onclick="navigate('scanner')" class="cursor-pointer p-3 rounded-xl border border-slate-200 hover:border-blue-400 hover:bg-blue-50/40 transition flex items-center gap-3">
+                                        <span class="w-7 h-7 rounded-lg bg-blue-600 text-white font-bold text-xs flex items-center justify-center shrink-0">3</span>
+                                        <div>
+                                            <p class="text-xs font-bold text-slate-800">Scan Massal LJK (Kamera/Foto)</p>
+                                            <p class="text-[11px] text-slate-500">Deteksi OMR otomatis hingga 100 LJK</p>
+                                        </div>
+                                    </div>
+                                    <div onclick="navigate('analytics')" class="cursor-pointer p-3 rounded-xl border border-slate-200 hover:border-blue-400 hover:bg-blue-50/40 transition flex items-center gap-3">
+                                        <span class="w-7 h-7 rounded-lg bg-blue-600 text-white font-bold text-xs flex items-center justify-center shrink-0">4</span>
+                                        <div>
+                                            <p class="text-xs font-bold text-slate-800">Unduh Rekap Excel & PDF</p>
+                                            <p class="text-[11px] text-slate-500">Lengkap dengan analisis butir soal</p>
+                                        </div>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            `;
+
+            // Render Chart
+            const buckets = [0, 0, 0, 0, 0]; // <50, 50-64, 65-74, 75-89, 90-100
+            scores.forEach(s => {
+                if (s < 50) buckets[0]++;
+                else if (s < 65) buckets[1]++;
+                else if (s < 75) buckets[2]++;
+                else if (s < 90) buckets[3]++;
+                else buckets[4]++;
+            });
+
+            const ctx = document.getElementById('dashboardScoreChart').getContext('2d');
+            if (dashboardChartInstance) dashboardChartInstance.destroy();
+            dashboardChartInstance = new Chart(ctx, {
+                type: 'bar',
+                data: {
+                    labels: ['< 50 (Kurang)', '50 - 64 (Cukup)', '65 - 74 (Hampir Tuntas)', '75 - 89 (Baik)', '90 - 100 (Sangat Baik)'],
+                    datasets: [{
+                        label: 'Jumlah Siswa',
+                        data: buckets,
+                        backgroundColor: ['#f43f5e', '#f59e0b', '#eab308', '#3b82f6', '#10b981'],
+                        borderRadius: 8
+                    }]
+                },
+                options: {
+                    responsive: true,
+                    maintainAspectRatio: false,
+                    plugins: { legend: { display: false } },
+                    scales: {
+                        y: { beginAtZero: true, ticks: { stepSize: 1 } }
+                    }
+                }
+            });
+        }
+
+        // ============================================================================
+        // 7. VIEW 2: BUAT UJIAN & GENERATOR LJK A4 (QR + ALIGNMENT MARKERS)
+        // ============================================================================
+        function renderCreateExam(container) {
+            const activeExam = getActiveExam();
+
+            container.innerHTML = `
+                <div class="grid grid-cols-1 xl:grid-cols-12 gap-6">
+                    <!-- Form Buat Ujian Baru -->
+                    <div class="xl:col-span-5 space-y-6">
+                        <div class="bg-white p-6 rounded-2xl border border-slate-200/80 shadow-sm">
+                            <h3 class="font-bold text-slate-800 text-base mb-1">Buat Paket Ujian Baru</h3>
+                            <p class="text-xs text-slate-500 mb-5">Isi identitas ujian SMP untuk membuat format LJK & kunci jawaban.</p>
+
+                            <form id="form-create-exam" onsubmit="handleCreateExam(event)" class="space-y-4">
+                                <div>
+                                    <label class="block text-xs font-semibold text-slate-700 mb-1">Nama Sekolah</label>
+                                    <input type="text" id="ex-school" required value="${activeExam ? activeExam.schoolName : 'SMP NEGERI 1 NUSANTARA'}" class="w-full px-3.5 py-2 text-sm border border-slate-300 rounded-xl focus:ring-2 focus:ring-blue-500 focus:outline-none">
+                                </div>
+                                <div class="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                                    <div>
+                                        <label class="block text-xs font-semibold text-slate-700 mb-1">Mata Pelajaran</label>
+                                        <input type="text" id="ex-subject" required placeholder="Contoh: Matematika" class="w-full px-3.5 py-2 text-sm border border-slate-300 rounded-xl focus:ring-2 focus:ring-blue-500 focus:outline-none">
+                                    </div>
+                                    <div>
+                                        <label class="block text-xs font-semibold text-slate-700 mb-1">Kelas</label>
+                                        <input type="text" id="ex-class" required placeholder="Contoh: VII-B" class="w-full px-3.5 py-2 text-sm border border-slate-300 rounded-xl focus:ring-2 focus:ring-blue-500 focus:outline-none">
+                                    </div>
+                                </div>
+                                <div>
+                                    <label class="block text-xs font-semibold text-slate-700 mb-1">Nama Ujian</label>
+                                    <input type="text" id="ex-name" required placeholder="Contoh: Ulangan Harian Bab 1" class="w-full px-3.5 py-2 text-sm border border-slate-300 rounded-xl focus:ring-2 focus:ring-blue-500 focus:outline-none">
+                                </div>
+                                <div class="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                                    <div>
+                                        <label class="block text-xs font-semibold text-slate-700 mb-1">Nama Guru</label>
+                                        <input type="text" id="ex-teacher" required value="${activeExam ? activeExam.teacherName : ''}" placeholder="Nama & Gelar" class="w-full px-3.5 py-2 text-sm border border-slate-300 rounded-xl focus:ring-2 focus:ring-blue-500 focus:outline-none">
+                                    </div>
+                                    <div>
+                                        <label class="block text-xs font-semibold text-slate-700 mb-1">Tanggal Ujian</label>
+                                        <input type="date" id="ex-date" required value="${new Date().toISOString().split('T')[0]}" class="w-full px-3.5 py-2 text-sm border border-slate-300 rounded-xl focus:ring-2 focus:ring-blue-500 focus:outline-none">
+                                    </div>
+                                </div>
+                                <div class="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                                    <div>
+                                        <label class="block text-xs font-semibold text-slate-700 mb-1">Jumlah Soal (10 - 100)</label>
+                                        <div class="flex gap-2">
+                                            <input type="number" id="ex-qcount" min="5" max="100" value="20" required class="w-full px-3.5 py-2 text-sm border border-slate-300 rounded-xl focus:ring-2 focus:ring-blue-500 focus:outline-none">
+                                            <select onchange="document.getElementById('ex-qcount').value=this.value" class="px-2 py-2 text-xs bg-slate-100 border border-slate-300 rounded-xl">
+                                                <option value="10">10</option>
+                                                <option value="20" selected>20</option>
+                                                <option value="30">30</option>
+                                                <option value="40">40</option>
+                                                <option value="50">50</option>
+                                                <option value="100">100</option>
+                                            </select>
+                                        </div>
+                                    </div>
+                                    <div>
+                                        <label class="block text-xs font-semibold text-slate-700 mb-1">Jenis Pilihan</label>
+                                        <input type="text" disabled value="Pilihan Ganda (A, B, C, D)" class="w-full px-3.5 py-2 text-xs bg-slate-100 text-slate-600 border border-slate-200 rounded-xl font-medium">
+                                    </div>
+                                </div>
+
+                                <button type="submit" class="w-full bg-blue-600 hover:bg-blue-700 text-white font-semibold py-2.5 rounded-xl shadow-sm transition flex items-center justify-center gap-2 text-sm">
+                                    <i data-lucide="plus-circle" class="w-4 h-4"></i>
+                                    <span>Simpan & Aktifkan Ujian</span>
+                                </button>
+                            </form>
+                        </div>
+
+                        <!-- Daftar Ujian Tersimpan -->
+                        <div class="bg-white p-6 rounded-2xl border border-slate-200/80 shadow-sm">
+                            <h3 class="font-bold text-slate-800 text-sm mb-3">Daftar Ujian Tersimpan (${AppState.exams.length})</h3>
+                            <div class="space-y-2 max-h-60 overflow-y-auto">
+                                ${AppState.exams.map(ex => `
+                                    <div class="p-3 rounded-xl border ${ex.id === AppState.activeExamId ? 'border-blue-500 bg-blue-50/40' : 'border-slate-200'} flex items-center justify-between gap-2">
+                                        <div class="min-w-0">
+                                            <p class="text-xs font-bold text-slate-800 truncate">${ex.examName}</p>
+                                            <p class="text-[11px] text-slate-500">${ex.subject} • Kelas ${ex.className} • ${ex.questionCount} Soal</p>
+                                        </div>
+                                        <div class="flex items-center gap-1 shrink-0">
+                                            <button onclick="switchActiveExam('${ex.id}')" class="px-2.5 py-1 text-[11px] font-semibold rounded-lg ${ex.id === AppState.activeExamId ? 'bg-blue-600 text-white' : 'bg-slate-100 text-slate-700 hover:bg-slate-200'}">
+                                                ${ex.id === AppState.activeExamId ? 'Aktif' : 'Pilih'}
+                                            </button>
+                                            ${AppState.exams.length > 1 ? `<button onclick="deleteExam('${ex.id}')" class="p-1.5 text-rose-500 hover:bg-rose-50 rounded-lg" title="Hapus Ujian"><i data-lucide="trash-2" class="w-3.5 h-3.5"></i></button>` : ''}
+                                        </div>
+                                    </div>
+                                `).join('')}
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- Generator & Preview LJK A4 -->
+                    <div class="xl:col-span-7">
+                        <div class="bg-white p-6 rounded-2xl border border-slate-200/80 shadow-sm">
+                            <div class="flex flex-wrap items-center justify-between gap-3 mb-4 pb-4 border-b border-slate-200">
+                                <div>
+                                    <h3 class="font-bold text-slate-800 text-base">Generator Lembar Jawaban Komputer (LJK)</h3>
+                                    <p class="text-xs text-slate-500">Format A4 Hitam-Putih dengan QR Code & 4 Penanda Sudut OMR</p>
+                                </div>
+                                <div class="flex flex-wrap items-center gap-2">
+                                    <button onclick="downloadFilledSampleLjkImage()" class="text-xs bg-emerald-600 hover:bg-emerald-700 text-white font-semibold px-3 py-2 rounded-xl transition flex items-center gap-1.5" title="Unduh contoh gambar LJK yang sudah terisi jawaban untuk langsung diuji di menu Scanner!">
+                                        <i data-lucide="image-down" class="w-3.5 h-3.5"></i>
+                                        <span>Unduh Sampel LJK Terisi (Tes Scan)</span>
+                                    </button>
+                                    <button onclick="downloadLjkPdf()" class="text-xs bg-slate-800 hover:bg-slate-900 text-white font-semibold px-3 py-2 rounded-xl transition flex items-center gap-1.5">
+                                        <i data-lucide="file-down" class="w-3.5 h-3.5"></i>
+                                        <span>Unduh PDF</span>
+                                    </button>
+                                    <button onclick="printLjkSheet()" class="text-xs bg-blue-600 hover:bg-blue-700 text-white font-semibold px-3 py-2 rounded-xl transition flex items-center gap-1.5">
+                                        <i data-lucide="printer" class="w-3.5 h-3.5"></i>
+                                        <span>Cetak LJK</span>
+                                    </button>
+                                </div>
+                            </div>
+
+                            <!-- Preview Wrapper (Scaled for screen) -->
+                            <div class="bg-slate-100 p-4 rounded-xl overflow-x-auto border border-slate-200">
+                                <div id="ljk-preview-wrapper" class="origin-top mx-auto">
+                                    ${activeExam ? buildLjkHtml(activeExam) : '<p class="text-center text-sm text-slate-500 py-10">Buat ujian terlebih dahulu</p>'}
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            `;
+
+            if (activeExam) {
+                renderLjkQrCode(activeExam);
+            }
+        }
+
+        function handleCreateExam(e) {
+            e.preventDefault();
+            const qCount = Math.min(100, Math.max(5, parseInt(document.getElementById('ex-qcount').value) || 20));
+            const defaultPt = Number((100 / qCount).toFixed(2));
+
+            const newExam = {
+                id: 'EXAM-' + Date.now(),
+                schoolName: document.getElementById('ex-school').value.trim(),
+                subject: document.getElementById('ex-subject').value.trim(),
+                className: document.getElementById('ex-class').value.trim(),
+                teacherName: document.getElementById('ex-teacher').value.trim(),
+                examName: document.getElementById('ex-name').value.trim(),
+                examDate: document.getElementById('ex-date').value,
+                questionCount: qCount,
+                answerKey: Array.from({ length: qCount }, (_, i) => ({
+                    no: i + 1,
+                    answer: 'A',
+                    points: defaultPt
+                }))
+            };
+
+            AppState.exams.unshift(newExam);
+            AppState.activeExamId = newExam.id;
+            saveState();
+            renderCurrentRoute();
+            showToast('Ujian Berhasil Dibuat', `LJK ${qCount} soal siap dicetak. Silakan atur kunci jawaban.`, 'success');
+        }
+
+        function deleteExam(examId) {
+            AppState.exams = AppState.exams.filter(e => e.id !== examId);
+            AppState.results = AppState.results.filter(r => r.examId !== examId);
+            if (AppState.activeExamId === examId) {
+                AppState.activeExamId = AppState.exams[0]?.id || null;
+            }
+            saveState();
+            renderCurrentRoute();
+            showToast('Ujian Dihapus', 'Paket ujian dan hasil terkait telah dihapus.', 'warning');
+        }
+
+        // Membangun struktur HTML LJK A4 dengan koordinat deterministik agar 100% terbaca oleh OMR Scanner
+        function buildLjkHtml(exam, studentPreset = null) {
+            const cols = exam.questionCount <= 25 ? 1 : (exam.questionCount <= 50 ? 2 : (exam.questionCount <= 75 ? 3 : 4));
+            const rowsPerCol = Math.ceil(exam.questionCount / cols);
+
+            let columnsHtml = '';
+            for (let c = 0; c < cols; c++) {
+                let rowsHtml = '';
+                for (let r = 0; r < rowsPerCol; r++) {
+                    const qNum = c * rowsPerCol + r + 1;
+                    if (qNum <= exam.questionCount) {
+                        const presetAns = studentPreset?.answers?.[qNum - 1] || '';
+                        rowsHtml += `
+                            <div class="flex items-center justify-between py-1 px-1.5 border-b border-slate-200 text-xs">
+                                <span class="font-bold w-6 text-right pr-1.5">${qNum}.</span>
+                                <div class="flex items-center gap-2.5">
+                                    ${['A', 'B', 'C', 'D'].map(opt => `
+                                        <span class="omr-bubble ${presetAns === opt ? 'filled' : ''}">${opt}</span>
+                                    `).join('')}
+                                </div>
+                            </div>
+                        `;
+                    }
+                }
+                columnsHtml += `<div class="border border-black rounded p-1.5 bg-white">${rowsHtml}</div>`;
+            }
+
+            const sheetCode = `${exam.id}|${studentPreset ? studentPreset.num : 'TEMPLATE'}`;
+
+            return `
+                <div id="ljk-a4-canvas" class="ljk-sheet shadow-md">
+                    <!-- 4 Corner Alignment Markers (Wajib untuk Deteksi OMR) -->
+                    <div class="marker marker-tl"></div>
+                    <div class="marker marker-tr"></div>
+                    <div class="marker marker-bl"></div>
+                    <div class="marker marker-br"></div>
+
+                    <!-- Header LJK -->
+                    <div class="mx-8 border-2 border-black p-3 mb-4 flex items-center justify-between gap-4">
+                        <div class="flex-1">
+                            <h1 class="text-base font-extrabold uppercase tracking-wide">${exam.schoolName}</h1>
+                            <h2 class="text-sm font-bold uppercase">LEMBAR JAWABAN KOMPUTER (LJK) – ${exam.examName}</h2>
+                            <div class="grid grid-cols-2 gap-x-4 gap-y-1 mt-2 text-xs">
+                                <p><strong>Mata Pelajaran:</strong> ${exam.subject}</p>
+                                <p><strong>Kelas:</strong> ${exam.className}</p>
+                                <p><strong>Guru Pengampu:</strong> ${exam.teacherName}</p>
+                                <p><strong>Tanggal:</strong> ${exam.examDate}</p>
+                            </div>
+                        </div>
+                        <div class="flex flex-col items-center shrink-0">
+                            <div id="ljk-qrcode" class="p-1 border border-black bg-white"></div>
+                            <span class="text-[8px] font-mono mt-1">${exam.id}</span>
+                        </div>
+                    </div>
+
+                    <!-- Identitas Siswa -->
+                    <div class="mx-8 border border-black p-3 mb-4 grid grid-cols-12 gap-3 text-xs">
+                        <div class="col-span-6">
+                            <label class="font-bold block mb-1">NAMA LENGKAP SISWA:</label>
+                            <div class="border-b border-dotted border-black h-6 flex items-center font-mono font-bold text-sm">
+                                ${studentPreset ? studentPreset.name : ''}
+                            </div>
+                        </div>
+                        <div class="col-span-3">
+                            <label class="font-bold block mb-1">NOMOR PESERTA:</label>
+                            <div class="border border-black h-6 px-2 flex items-center font-mono font-bold text-sm">
+                                ${studentPreset ? studentPreset.num : ''}
+                            </div>
+                        </div>
+                        <div class="col-span-3">
+                            <label class="font-bold block mb-1">KELAS:</label>
+                            <div class="border border-black h-6 px-2 flex items-center font-mono font-bold text-sm">
+                                ${studentPreset ? studentPreset.cls : exam.className}
+                            </div>
+                        </div>
+                        <div class="col-span-12 text-[10px] bg-slate-100 p-1.5 border border-slate-400">
+                            <strong>PETUNJUK PENGISIAN:</strong> Hitamkan penuh satu bulatan pilihan jawaban (A, B, C, atau D) menggunakan pensil 2B atau pulpen hitam. Jangan melipat atau mengotori tanda kotak hitam di keempat sudut kertas.
+                        </div>
+                    </div>
+
+                    <!-- Grid Jawaban OMR -->
+                    <div class="mx-8">
+                        <div class="grid grid-cols-${cols} gap-3">
+                            ${columnsHtml}
+                        </div>
+                    </div>
+
+                    <!-- Footer -->
+                    <div class="mx-8 mt-4 pt-2 border-t border-black flex justify-between text-[10px] font-mono">
+                        <span>SMART EXAM SCANNER SYSTEM • KODE: ${sheetCode}</span>
+                        <span>JUMLAH SOAL: ${exam.questionCount} BUTIR</span>
+                    </div>
+                </div>
+            `;
+        }
+
+        function renderLjkQrCode(exam, preset = null) {
+            const qrEl = document.getElementById('ljk-qrcode');
+            if (!qrEl) return;
+            qrEl.innerHTML = '';
+            const payload = JSON.stringify({
+                e: exam.id,
+                q: exam.questionCount,
+                s: preset ? preset.num : ''
+            });
+            new QRCode(qrEl, {
+                text: payload,
+                width: 64,
+                height: 64,
+                colorDark: "#000000",
+                colorLight: "#ffffff",
+                correctLevel: QRCode.CorrectLevel.M
+            });
+        }
+
+        function printLjkSheet() {
+            const ljkEl = document.getElementById('ljk-a4-canvas');
+            if (!ljkEl) return;
+            const printArea = document.getElementById('print-area');
+            printArea.innerHTML = ljkEl.outerHTML;
+            printArea.classList.remove('hidden');
+            window.print();
+            printArea.classList.add('hidden');
+        }
+
+        async function downloadLjkPdf() {
+            const ljkEl = document.getElementById('ljk-a4-canvas');
+            const exam = getActiveExam();
+            if (!ljkEl || !exam) return;
+
+            showToast('Membuat PDF LJK...', 'Sedang merender lembar jawaban resolusi tinggi.', 'info');
+            const canvas = await html2canvas(ljkEl, { scale: 2, backgroundColor: '#ffffff' });
+            const imgData = canvas.toDataURL('image/png');
+            const { jsPDF } = window.jspdf;
+            const pdf = new jsPDF('p', 'mm', 'a4');
+            pdf.addImage(imgData, 'PNG', 0, 0, 210, 297);
+            pdf.save(`LJK_${exam.subject}_${exam.className}.pdf`);
+            showToast('PDF Berhasil Diunduh', 'File LJK A4 siap dicetak untuk siswa.', 'success');
+        }
+
+        // Generator Gambar LJK Terisi Sintetis yang PRESISI untuk pengujian langsung di fitur Scanner
+        function downloadFilledSampleLjkImage() {
+            const exam = getActiveExam();
+            if (!exam) return;
+
+            const studentName = 'ANDI WIJAYA';
+            const studentNum = 'SMP-099';
+            // Buat jawaban acak dengan 1 jawaban ganda & 1 kosong agar guru bisa melihat semua fitur OMR bekerja
+            const answers = exam.answerKey.map((k, i) => {
+                if (i === 1) return 'DOUBLE'; // Nomor 2 sengaja ganda
+                if (i === 3) return '';       // Nomor 4 sengaja kosong
+                return Math.random() > 0.2 ? k.answer : ['A', 'B', 'C', 'D'][(i + 1) % 4];
+            });
+
+            const canvas = renderSyntheticOmrCanvas(exam, {
+                name: studentName,
+                num: studentNum,
+                cls: exam.className,
+                answers
+            });
+
+            const link = document.createElement('a');
+            link.download = `SAMPEL_LJK_TERISI_${exam.questionCount}SOAL_${studentNum}.png`;
+            link.href = canvas.toDataURL('image/png');
+            link.click();
+            showToast('Sampel LJK Terisi Diunduh', 'Unggah gambar ini di menu "4. Scanner LJK" untuk menguji pembacaan OMR!', 'success');
+        }
+
+        // ============================================================================
+        // 8. VIEW 3: KUNCI JAWABAN & PEMBOBOTAN POINT
+        // ============================================================================
+        function renderAnswerKey(container) {
+            const exam = getActiveExam();
+            if (!exam) {
+                container.innerHTML = `<div class="bg-white p-8 rounded-2xl text-center">Silakan buat ujian terlebih dahulu.</div>`;
+                return;
+            }
+
+            const totalPoints = exam.answerKey.reduce((sum, item) => sum + (Number(item.points) || 0), 0);
+
+            container.innerHTML = `
+                <div class="space-y-6">
+                    <!-- Toolbar Pengaturan Point & Impor Excel -->
+                    <div class="bg-white p-5 rounded-2xl border border-slate-200/80 shadow-sm flex flex-wrap items-center justify-between gap-4">
+                        <div>
+                            <h3 class="font-bold text-slate-800">${exam.examName} (${exam.subject})</h3>
+                            <p class="text-xs text-slate-500">Total Soal: <strong>${exam.questionCount}</strong> • Total Bobot Point: <strong class="text-blue-600 text-sm" id="total-points-display">${totalPoints}</strong></p>
+                        </div>
+
+                        <div class="flex flex-wrap items-center gap-2">
+                            <!-- Set Semua Point Sama -->
+                            <div class="flex items-center bg-slate-100 rounded-xl p-1 border border-slate-200">
+                                <input type="number" id="bulk-point-val" step="0.5" value="5" class="w-16 bg-white text-xs font-bold text-center py-1.5 rounded-lg border border-slate-200 focus:outline-none">
+                                <button onclick="applyUniformPoints()" class="text-xs font-semibold text-slate-700 hover:text-blue-600 px-2.5 py-1.5">
+                                    Samakan Semua Point
+                                </button>
+                            </div>
+
+                            <!-- Bagi Rata Total 100 -->
+                            <button onclick="distribute100Points()" class="text-xs bg-indigo-50 hover:bg-indigo-100 text-indigo-700 font-semibold px-3 py-2 rounded-xl border border-indigo-200 transition">
+                                Bagi Rata Total = 100
+                            </button>
+
+                            <!-- Impor dari Excel -->
+                            <label class="cursor-pointer text-xs bg-emerald-600 hover:bg-emerald-700 text-white font-semibold px-3.5 py-2 rounded-xl transition flex items-center gap-1.5">
+                                <i data-lucide="file-spreadsheet" class="w-3.5 h-3.5"></i>
+                                <span>Impor Excel</span>
+                                <input type="file" accept=".xlsx,.xls,.csv" onchange="importAnswerKeyExcel(event)" class="hidden">
+                            </label>
+
+                            <button onclick="downloadKeyTemplateExcel()" class="text-xs bg-slate-100 hover:bg-slate-200 text-slate-700 font-medium px-3 py-2 rounded-xl transition" title="Unduh format Excel kunci jawaban">
+                                Template Excel
+                            </button>
+                        </div>
+                    </div>
+
+                    <!-- Tabel Kunci Jawaban -->
+                    <div class="bg-white rounded-2xl border border-slate-200/80 shadow-sm overflow-hidden">
+                        <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 divide-y md:divide-y-0 md:divide-x divide-slate-200">
+                            ${renderAnswerKeyColumns(exam)}
+                        </div>
+                    </div>
+                </div>
+            `;
+        }
+
+        function renderAnswerKeyColumns(exam) {
+            const perCol = Math.ceil(exam.questionCount / 4);
+            let html = '';
+
+            for (let c = 0; c < 4; c++) {
+                const start = c * perCol;
+                const end = Math.min(start + perCol, exam.questionCount);
+                if (start >= exam.questionCount) {
+                    html += `<div class="p-4 bg-slate-50/50"></div>`;
+                    continue;
+                }
+
+                let rows = '';
+                for (let i = start; i < end; i++) {
+                    const item = exam.answerKey[i];
+                    rows += `
+                        <tr class="border-b border-slate-100 hover:bg-blue-50/30">
+                            <td class="py-2 px-3 text-xs font-bold text-slate-700 w-10">${item.no}</td>
+                            <td class="py-2 px-2">
+                                <div class="flex items-center gap-1">
+                                    ${['A', 'B', 'C', 'D'].map(opt => `
+                                        <button type="button" onclick="updateKeyAnswer(${i}, '${opt}')"
+                                            class="w-7 h-7 rounded-full text-xs font-bold transition ${item.answer === opt ? 'bg-blue-600 text-white shadow-sm' : 'bg-slate-100 text-slate-600 hover:bg-slate-200'}">
+                                            ${opt}
+                                        </button>
+                                    `).join('')}
+                                </div>
+                            </td>
+                            <td class="py-2 px-3 text-right">
+                                <input type="number" step="0.5" min="0" value="${item.points}" onchange="updateKeyPoint(${i}, this.value)"
+                                    class="w-16 text-xs font-semibold text-center py-1 px-1.5 border border-slate-200 rounded-lg focus:border-blue-500 focus:outline-none">
+                            </td>
+                        </tr>
+                    `;
+                }
+
+                html += `
+                    <div class="overflow-x-auto">
+                        <table class="w-full text-left border-collapse">
+                            <thead>
+                                <tr class="bg-slate-50 border-b border-slate-200 text-[11px] font-bold text-slate-500 uppercase">
+                                    <th class="py-2.5 px-3">No</th>
+                                    <th class="py-2.5 px-2">Kunci</th>
+                                    <th class="py-2.5 px-3 text-right">Point</th>
+                                </tr>
+                            </thead>
+                            <tbody>${rows}</tbody>
+                        </table>
+                    </div>
+                `;
+            }
+            return html;
+        }
+
+        function updateKeyAnswer(index, opt) {
+            const exam = getActiveExam();
+            if (!exam) return;
+            exam.answerKey[index].answer = opt;
+            regradeAllResultsForExam(exam);
+            saveState();
+            renderCurrentRoute();
+        }
+
+        function updateKeyPoint(index, val) {
+            const exam = getActiveExam();
+            if (!exam) return;
+            exam.answerKey[index].points = Math.max(0, parseFloat(val) || 0);
+            regradeAllResultsForExam(exam);
+            saveState();
+            const total = exam.answerKey.reduce((s, x) => s + x.points, 0);
+            const disp = document.getElementById('total-points-display');
+            if (disp) disp.textContent = total;
+            showToast('Point Diperbarui', 'Nilai seluruh siswa otomatis dihitung ulang.', 'info');
+        }
+
+        function applyUniformPoints() {
+            const exam = getActiveExam();
+            const val = parseFloat(document.getElementById('bulk-point-val').value) || 0;
+            exam.answerKey.forEach(k => k.points = val);
+            regradeAllResultsForExam(exam);
+            saveState();
+            renderCurrentRoute();
+            showToast('Point Massal Diterapkan', `Semua soal diatur menjadi ${val} point.`, 'success');
+        }
+
+        function distribute100Points() {
+            const exam = getActiveExam();
+            const pt = Number((100 / exam.questionCount).toFixed(2));
+            exam.answerKey.forEach(k => k.points = pt);
+            regradeAllResultsForExam(exam);
+            saveState();
+            renderCurrentRoute();
+            showToast('Point Dibagi Rata', `Setiap soal bernilai ${pt} point (Total 100).`, 'success');
+        }
+
+        function regradeAllResultsForExam(exam) {
+            AppState.results.forEach(res => {
+                if (res.examId === exam.id) {
+                    const updated = gradeStudentAnswers(exam, res.answers, res.statuses);
+                    Object.assign(res, updated);
+                }
+            });
+        }
+
+        function downloadKeyTemplateExcel() {
+            const exam = getActiveExam();
+            const data = exam.answerKey.map(k => ({
+                No: k.no,
+                Kunci: k.answer,
+                Point: k.points
+            }));
+            const ws = XLSX.utils.json_to_sheet(data);
+            const wb = XLSX.utils.book_new();
+            XLSX.utils.book_append_sheet(wb, ws, 'KunciJawaban');
+            XLSX.writeFile(wb, `Template_Kunci_${exam.subject}.xlsx`);
+        }
+
+        function importAnswerKeyExcel(event) {
+            const file = event.target.files[0];
+            if (!file) return;
+            const exam = getActiveExam();
+            const reader = new FileReader();
+            reader.onload = (e) => {
+                try {
+                    const wb = XLSX.read(e.target.result, { type: 'array' });
+                    const ws = wb.Sheets[wb.SheetNames[0]];
+                    const rows = XLSX.utils.sheet_to_json(ws);
+                    let updated = 0;
+                    rows.forEach(r => {
+                        const no = parseInt(r.No || r.no || r.NO);
+                        const ans = String(r.Kunci || r.kunci || r.Jawaban || '').trim().toUpperCase();
+                        const pt = parseFloat(r.Point || r.point || r.Bobot);
+                        if (no >= 1 && no <= exam.questionCount && ['A', 'B', 'C', 'D'].includes(ans)) {
+                            exam.answerKey[no - 1].answer = ans;
+                            if (!isNaN(pt)) exam.answerKey[no - 1].points = pt;
+                            updated++;
+                        }
+                    });
+                    regradeAllResultsForExam(exam);
+                    saveState();
+                    renderCurrentRoute();
+                    showToast('Impor Excel Berhasil', `${updated} kunci jawaban berhasil diperbarui.`, 'success');
+                } catch (err) {
+                    showToast('Gagal Impor Excel', 'Pastikan kolom Excel bernama: No, Kunci, Point.', 'error');
+                }
+            };
+            reader.readAsArrayBuffer(file);
+        }
+
+        // ============================================================================
+        // 9. MESIN OMR (OPTICAL MARK RECOGNITION) & AI VISION ENGINE
+        // ============================================================================
+
+        // Render LJK Sintetis ke Canvas beresolusi tetap (1000 x 1414 px - Rasio A4)
+        // Digunakan untuk membuat sampel LJK siap scan & simulasi batch multi-lembar
+        function renderSyntheticOmrCanvas(exam, student) {
+            const W = 1000;
+            const H = 1414;
+            const canvas = document.createElement('canvas');
+            canvas.width = W;
+            canvas.height = H;
+            const ctx = canvas.getContext('2d');
+
+            // Latar putih bersih
+            ctx.fillStyle = '#ffffff';
+            ctx.fillRect(0, 0, W, H);
+
+            // 4 Penanda Sudut Hitam (Alignment Markers) di koordinat tetap
+            const mSize = 36;
+            const mPad = 38;
+            ctx.fillStyle = '#000000';
+            ctx.fillRect(mPad, mPad, mSize, mSize); // Top-Left
+            ctx.fillRect(W - mPad - mSize, mPad, mSize, mSize); // Top-Right
+            ctx.fillRect(mPad, H - mPad - mSize, mSize, mSize); // Bottom-Left
+            ctx.fillRect(W - mPad - mSize, H - mPad - mSize, mSize, mSize); // Bottom-Right
+
+            // Header Box
+            ctx.strokeStyle = '#000000';
+            ctx.lineWidth = 2;
+            ctx.strokeRect(85, 50, W - 170, 120);
+
+            ctx.fillStyle = '#000000';
+            ctx.font = 'bold 20px Inter, sans-serif';
+            ctx.fillText(exam.schoolName.toUpperCase(), 105, 82);
+            ctx.font = 'bold 15px Inter, sans-serif';
+            ctx.fillText(`LJK OMR – ${exam.examName} (${exam.subject})`, 105, 108);
+            ctx.font = '13px Inter, sans-serif';
+            ctx.fillText(`Nama: ${student.name}   |   No. Peserta: ${student.num}   |   Kelas: ${student.cls}`, 105, 138);
+
+            // Gambar QR Code di pojok kanan header (menggunakan QRCode.js offscreen)
+            const qrDiv = document.createElement('div');
+            const qrPayload = JSON.stringify({ e: exam.id, q: exam.questionCount, s: student.num, n: student.name, c: student.cls });
+            new QRCode(qrDiv, { text: qrPayload, width: 96, height: 96, correctLevel: QRCode.CorrectLevel.M });
+            const qrCanvas = qrDiv.querySelector('canvas');
+            if (qrCanvas) {
+                ctx.drawImage(qrCanvas, W - 195, 62, 96, 96);
+            }
+
+            // Grid Bulatan Jawaban (Koordinat terkalibrasi dengan scanner OMR)
+            const cols = exam.questionCount <= 25 ? 1 : (exam.questionCount <= 50 ? 2 : (exam.questionCount <= 75 ? 3 : 4));
+            const rowsPerCol = Math.ceil(exam.questionCount / cols);
+            const gridStartX = 95;
+            const gridStartY = 210;
+            const gridW = W - 190;
+            const gridH = H - 290;
+            const colW = gridW / cols;
+            const rowH = Math.min(42, gridH / rowsPerCol);
+
+            for (let c = 0; c < cols; c++) {
+                const colX = gridStartX + c * colW;
+                ctx.strokeStyle = '#94a3b8';
+                ctx.lineWidth = 1;
+                ctx.strokeRect(colX + 4, gridStartY - 15, colW - 8, rowsPerCol * rowH + 20);
+
+                for (let r = 0; r < rowsPerCol; r++) {
+                    const qIdx = c * rowsPerCol + r;
+                    if (qIdx >= exam.questionCount) break;
+
+                    const cy = gridStartY + r * rowH + rowH * 0.5;
+                    ctx.fillStyle = '#000000';
+                    ctx.font = 'bold 13px Inter, sans-serif';
+                    ctx.fillText(`${qIdx + 1}.`, colX + 12, cy + 5);
+
+                    const ans = student.answers[qIdx] || '';
+                    ['A', 'B', 'C', 'D'].forEach((opt, optIdx) => {
+                        const cx = colX + 55 + optIdx * 36;
+                        const radius = 11;
+
+                        ctx.beginPath();
+                        ctx.arc(cx, cy, radius, 0, Math.PI * 2);
+                        ctx.strokeStyle = '#000000';
+                        ctx.lineWidth = 1.8;
+                        ctx.stroke();
+
+                        // Hitamkan jika dipilih (atau ganda)
+                        const shouldFill = (ans === opt) || (ans === 'DOUBLE' && (opt === 'A' || opt === 'C'));
+                        if (shouldFill) {
+                            ctx.fillStyle = '#000000';
+                            ctx.fill();
+                        } else {
+                            ctx.fillStyle = '#475569';
+                            ctx.font = 'bold 10px Inter, sans-serif';
+                            ctx.fillText(opt, cx - 3.5, cy + 3.5);
+                        }
+                    });
+                }
+            }
+
+            return canvas;
+        }
+
+        // Pemrosesan Citra Nyata OMR:
+        // 1. Auto-crop & koreksi perspektif/rotasi berbasis 4 penanda sudut gelap
+        // 2. Pembacaan QR Code menggunakan jsQR untuk identifikasi otomatis
+        // 3. Analisis intensitas piksel (grayscale luminance) pada setiap ROI bulatan A, B, C, D
+        // 4. Visualisasi overlay hijau/merah/kuning pada hasil scan
+        async function processImageWithOMR(imageSourceCanvas, exam, fallbackMeta = {}) {
+            const W = 1000;
+            const H = 1414;
+
+            // Normalisasi ukuran & koreksi perspektif sudut
+            const alignedCanvas = alignAndNormalizeSheet(imageSourceCanvas, W, H);
+            const ctx = alignedCanvas.getContext('2d');
+            const imgData = ctx.getImageData(0, 0, W, H);
+
+            // 1. Deteksi QR Code di area header untuk identitas siswa & validasi lembar
+            let qrInfo = null;
+            try {
+                const headerData = ctx.getImageData(0, 0, W, 240);
+                const code = jsQR(headerData.data, W, 240);
+                if (code && code.data) {
+                    qrInfo = JSON.parse(code.data);
+                }
+            } catch (e) { /* QR tidak terbaca atau format bebas */ }
+
+            // 2. Jika ada AI Vision API Key & gambar adalah foto nyata, baca tulisan tangan nama/nomor siswa
+            let aiIdentity = null;
+            if (AppState.settings.useAiVisionForIdentity && AppState.settings.geminiApiKey) {
+                aiIdentity = await extractStudentIdentityWithGemini(alignedCanvas);
+            }
+
+            // 3. Pemindaian Bulatan OMR (Optical Mark Recognition)
+            const cols = exam.questionCount <= 25 ? 1 : (exam.questionCount <= 50 ? 2 : (exam.questionCount <= 75 ? 3 : 4));
+            const rowsPerCol = Math.ceil(exam.questionCount / cols);
+            const gridStartX = 95;
+            const gridStartY = 210;
+            const gridW = W - 190;
+            const gridH = H - 290;
+            const colW = gridW / cols;
+            const rowH = Math.min(42, gridH / rowsPerCol);
+
+            const detectedAnswers = [];
+            const detectedStatuses = [];
+
+            // Buat canvas overlay untuk menunjukkan hasil pembacaan scanner kepada guru
+            const overlayCanvas = document.createElement('canvas');
+            overlayCanvas.width = W;
+            overlayCanvas.height = H;
+            const oCtx = overlayCanvas.getContext('2d');
+            oCtx.drawImage(alignedCanvas, 0, 0);
+
+            const threshold = AppState.settings.omrThreshold; // default 0.38
+            const ambiguityMargin = AppState.settings.omrAmbiguityMargin; // default 0.12
+
+            for (let qIdx = 0; qIdx < exam.questionCount; qIdx++) {
+                const c = Math.floor(qIdx / rowsPerCol);
+                const r = qIdx % rowsPerCol;
+                const colX = gridStartX + c * colW;
+                const cy = gridStartY + r * rowH + rowH * 0.5;
+
+                const scores = ['A', 'B', 'C', 'D'].map((opt, optIdx) => {
+                    const cx = colX + 55 + optIdx * 36;
+                    const darkness = measureBubbleDarkness(imgData, W, H, cx, cy, 9);
+                    return { opt, cx, cy, darkness };
+                });
+
+                // Urutkan dari yang paling gelap
+                const sorted = [...scores].sort((a, b) => b.darkness - a.darkness);
+                const top1 = sorted[0];
+                const top2 = sorted[1];
+
+                let finalAns = '';
+                let status = 'OK';
+
+                if (top1.darkness < threshold) {
+                    // Tidak ada bulatan yang cukup hitam -> Kosong
+                    // Cek apakah ada arsir samar mendekati ambang batas
+                    if (top1.darkness > threshold - 0.08) {
+                        status = 'VERIFY';
+                        finalAns = top1.opt;
+                    } else {
+                        status = 'EMPTY';
+                        finalAns = '';
+                    }
+                } else if (top2.darkness >= threshold) {
+                    // Lebih dari 1 bulatan melewati ambang batas -> Jawaban Ganda
+                    status = 'DOUBLE';
+                    finalAns = 'DOUBLE';
+                } else if ((top1.darkness - top2.darkness) < ambiguityMargin) {
+                    // Selisih terlalu tipis -> Kurang jelas / Perlu Verifikasi
+                    status = 'VERIFY';
+                    finalAns = top1.opt;
+                } else {
+                    // Terbaca jelas
+                    status = 'OK';
+                    finalAns = top1.opt;
+                }
+
+                detectedAnswers.push(finalAns);
+                detectedStatuses.push(status);
+
+                // Gambar kotak/lingkaran penanda hasil deteksi di overlayCanvas
+                const keyAns = exam.answerKey[qIdx]?.answer;
+                scores.forEach(s => {
+                    if (status === 'DOUBLE' && s.darkness >= threshold) {
+                        oCtx.strokeStyle = '#ef4444';
+                        oCtx.lineWidth = 3;
+                        oCtx.strokeRect(s.cx - 14, s.cy - 14, 28, 28);
+                    } else if (s.opt === finalAns && status === 'VERIFY') {
+                        oCtx.strokeStyle = '#f59e0b';
+                        oCtx.lineWidth = 3;
+                        oCtx.strokeRect(s.cx - 14, s.cy - 14, 28, 28);
+                    } else if (s.opt === finalAns && status === 'OK') {
+                        oCtx.strokeStyle = (finalAns === keyAns) ? '#10b981' : '#ef4444';
+                        oCtx.lineWidth = 3;
+                        oCtx.beginPath();
+                        oCtx.arc(s.cx, s.cy, 14, 0, Math.PI * 2);
+                        oCtx.stroke();
+                    }
+                });
+            }
+
+            const studentNum = qrInfo?.s || aiIdentity?.studentNumber || fallbackMeta.studentNumber || `SISWA-${Math.floor(100 + Math.random() * 900)}`;
+            const studentName = qrInfo?.n || aiIdentity?.studentName || fallbackMeta.studentName || `Peserta ${studentNum}`;
+            const studentClass = qrInfo?.c || aiIdentity?.studentClass || fallbackMeta.studentClass || exam.className;
+            const sheetUid = `${exam.id}-${studentNum}`;
+
+            return {
+                sheetUid,
+                studentName,
+                studentClass,
+                studentNumber: studentNum,
+                answers: detectedAnswers,
+                statuses: detectedStatuses,
+                overlayDataUrl: overlayCanvas.toDataURL('image/jpeg', 0.78),
+                qrDetected: !!qrInfo
+            };
+        }
+
+        // Mengukur rasio piksel gelap (luminance < 135) di dalam radius bulatan
+        function measureBubbleDarkness(imgData, width, height, cx, cy, radius) {
+            const data = imgData.data;
+            let darkPixels = 0;
+            let totalPixels = 0;
+
+            const x0 = Math.max(0, Math.floor(cx - radius));
+            const x1 = Math.min(width - 1, Math.ceil(cx + radius));
+            const y0 = Math.max(0, Math.floor(cy - radius));
+            const y1 = Math.min(height - 1, Math.ceil(cy + radius));
+
+            for (let y = y0; y <= y1; y++) {
+                for (let x = x0; x <= x1; x++) {
+                    const dx = x - cx;
+                    const dy = y - cy;
+                    if (dx * dx + dy * dy <= radius * radius) {
+                        const idx = (y * width + x) * 4;
+                        const lum = 0.299 * data[idx] + 0.587 * data[idx + 1] + 0.114 * data[idx + 2];
+                        if (lum < 140) darkPixels++;
+                        totalPixels++;
+                    }
+                }
+            }
+            return totalPixels > 0 ? darkPixels / totalPixels : 0;
+        }
+
+        // Auto-crop & koreksi pencahayaan (adaptive contrast stretch) berdasarkan bounding box marker sudut
+        function alignAndNormalizeSheet(srcCanvas, targetW, targetH) {
+            const out = document.createElement('canvas');
+            out.width = targetW;
+            out.height = targetH;
+            const ctx = out.getContext('2d');
+
+            // Cari area gelap (alignment markers) di 4 kuadran untuk auto-crop margin luar kertas
+            const sW = srcCanvas.width;
+            const sH = srcCanvas.height;
+            const sCtx = srcCanvas.getContext('2d');
+            const sData = sCtx.getImageData(0, 0, sW, sH).data;
+
+            let minX = sW, minY = sH, maxX = 0, maxY = 0;
+            let foundMarkers = 0;
+
+            // Sampling cepat setiap 4 piksel untuk menemukan kotak marker sudut
+            for (let y = 10; y < sH - 10; y += 4) {
+                for (let x = 10; x < sW - 10; x += 4) {
+                    const i = (y * sW + x) * 4;
+                    const lum = (sData[i] + sData[i + 1] + sData[i + 2]) / 3;
+                    if (lum < 70) {
+                        if (x < minX) minX = x;
+                        if (x > maxX) maxX = x;
+                        if (y < minY) minY = y;
+                        if (y > maxY) maxY = y;
+                        foundMarkers++;
+                    }
+                }
+            }
+
+            // Jika ditemukan area konten yang valid, crop dengan margin proporsional ke target A4
+            if (foundMarkers > 50 && (maxX - minX) > sW * 0.4 && (maxY - minY) > sH * 0.4) {
+                const padX = (maxX - minX) * 0.042;
+                const padY = (maxY - minY) * 0.03;
+                const sx = Math.max(0, minX - padX);
+                const sy = Math.max(0, minY - padY);
+                const sw = Math.min(sW - sx, (maxX - minX) + padX * 2);
+                const sh = Math.min(sH - sy, (maxY - minY) + padY * 2);
+                ctx.drawImage(srcCanvas, sx, sy, sw, sh, 0, 0, targetW, targetH);
+            } else {
+                ctx.drawImage(srcCanvas, 0, 0, targetW, targetH);
+            }
+
+            // Normalisasi pencahayaan (Contrast Enhancement) agar kertas redup tetap terbaca tajam
+            const normImg = ctx.getImageData(0, 0, targetW, targetH);
+            const d = normImg.data;
+            for (let i = 0; i < d.length; i += 4) {
+                const avg = 0.299 * d[i] + 0.587 * d[i + 1] + 0.114 * d[i + 2];
+                // Stretch kontras
+                const stretched = avg < 110 ? Math.max(0, avg * 0.6) : (avg > 185 ? 255 : avg);
+                d[i] = d[i + 1] = d[i + 2] = stretched;
+            }
+            ctx.putImageData(normImg, 0, 0);
+
+            return out;
+        }
+
+        // Opsional AI Vision Gemini untuk membaca tulisan tangan Nama & Nomor Peserta di bagian atas LJK
+        async function extractStudentIdentityWithGemini(canvas) {
+            try {
+                // Potong hanya bagian header (300px teratas) agar hemat bandwidth & cepat
+                const cropCanvas = document.createElement('canvas');
+                cropCanvas.width = canvas.width;
+                cropCanvas.height = 300;
+                cropCanvas.getContext('2d').drawImage(canvas, 0, 0, canvas.width, 300, 0, 0, canvas.width, 300);
+                const base64Data = cropCanvas.toDataURL('image/jpeg', 0.8).split(',')[1];
+
+                const url = `https://generativelanguage.googleapis.com/v1beta/models/gemini-3-flash-preview:generateContent?key=${AppState.settings.geminiApiKey}`;
+                const payload = {
+                    contents: [{
+                        parts: [
+                            { text: "Baca tulisan tangan pada lembar jawaban ujian ini dan kembalikan JSON dengan field: studentName, studentNumber, studentClass." },
+                            { inlineData: { mimeType: "image/jpeg", data: base64Data } }
+                        ]
+                    }],
+                    generationConfig: {
+                        responseMimeType: "application/json",
+                        responseSchema: {
+                            type: "OBJECT",
+                            properties: {
+                                studentName: { type: "STRING" },
+                                studentNumber: { type: "STRING" },
+                                studentClass: { type: "STRING" }
+                            }
+                        }
+                    }
+                };
+
+                const resp = await fetch(url, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(payload)
+                });
+                const json = await resp.json();
+                const text = json?.candidates?.[0]?.content?.parts?.[0]?.text;
+                return text ? JSON.parse(text) : null;
+            } catch (e) {
+                return null;
+            }
+        }
+
+        // ============================================================================
+        // 10. VIEW 4: SCANNER LJK OTOMATIS (KAMERA, UPLOAD FOTO/PDF, BATCH QUEUE)
+        // ============================================================================
+        let cameraStream = null;
+        let scanQueue = []; // { id, name, status: 'pending'|'processing'|'success'|'verify'|'duplicate'|'error', sourceCanvas, result }
+        let isProcessingQueue = false;
+
+        function renderScanner(container) {
+            const exam = getActiveExam();
+            if (!exam) {
+                container.innerHTML = `<div class="bg-white p-8 rounded-2xl text-center">Silakan buat ujian terlebih dahulu.</div>`;
+                return;
+            }
+
+            container.innerHTML = `
+                <div class="space-y-6">
+                    <!-- Banner Info Ujian Aktif -->
+                    <div class="bg-gradient-to-r from-blue-700 to-indigo-700 text-white p-5 rounded-2xl shadow-md flex flex-wrap items-center justify-between gap-4">
+                        <div>
+                            <span class="text-[11px] uppercase tracking-wider bg-white/20 px-2.5 py-0.5 rounded-full font-semibold">Mode Pemindaian OMR + AI</span>
+                            <h3 class="text-lg font-bold mt-1.5">${exam.examName} – ${exam.subject}</h3>
+                            <p class="text-xs text-blue-100">Kelas ${exam.className} • ${exam.questionCount} Soal • Deteksi Ganda, Kosong & Ragu-ragu Aktif</p>
+                        </div>
+                        <div class="flex flex-wrap gap-2">
+                            <button onclick="simulateBatchScan(15)" class="bg-white text-blue-700 hover:bg-blue-50 text-xs font-bold px-3.5 py-2.5 rounded-xl shadow transition flex items-center gap-1.5">
+                                <i data-lucide="layers" class="w-4 h-4"></i>
+                                <span>Simulasi Batch 15 LJK</span>
+                            </button>
+                        </div>
+                    </div>
+
+                    <!-- 3 Metode Input Scanner -->
+                    <div class="grid grid-cols-1 lg:grid-cols-2 gap-6">
+                        <!-- METODE A: KAMERA LANGSUNG -->
+                        <div class="bg-white p-6 rounded-2xl border border-slate-200/80 shadow-sm flex flex-col">
+                            <div class="flex items-center justify-between mb-3">
+                                <div class="flex items-center gap-2.5">
+                                    <div class="w-9 h-9 rounded-xl bg-blue-50 text-blue-600 flex items-center justify-center"><i data-lucide="camera" class="w-5 h-5"></i></div>
+                                    <div>
+                                        <h4 class="font-bold text-slate-800 text-sm">A. Scan Melalui Kamera / Webcam</h4>
+                                        <p class="text-[11px] text-slate-500">Pindai langsung berurutan lembar demi lembar</p>
+                                    </div>
+                                </div>
+                                <div class="flex gap-1.5">
+                                    <button id="btn-start-cam" onclick="startCamera()" class="text-xs bg-blue-600 hover:bg-blue-700 text-white font-semibold px-3 py-1.5 rounded-lg">Aktifkan Kamera</button>
+                                    <button id="btn-stop-cam" onclick="stopCamera()" class="hidden text-xs bg-rose-600 hover:bg-rose-700 text-white font-semibold px-3 py-1.5 rounded-lg">Matikan</button>
+                                </div>
+                            </div>
+
+                            <!-- Viewport Kamera -->
+                            <div class="relative bg-slate-900 rounded-xl overflow-hidden aspect-[3/4] max-h-96 flex items-center justify-center border border-slate-300">
+                                <video id="scanner-video" autoplay playsinline class="w-full h-full object-cover hidden"></video>
+                                <!-- Panduan Alignment Marker di Layar Kamera -->
+                                <div id="camera-guide" class="hidden absolute inset-6 border-2 border-dashed border-emerald-400/80 rounded-lg pointer-events-none flex flex-col justify-between p-2">
+                                    <div class="flex justify-between">
+                                        <span class="w-5 h-5 border-t-4 border-l-4 border-emerald-400"></span>
+                                        <span class="w-5 h-5 border-t-4 border-r-4 border-emerald-400"></span>
+                                    </div>
+                                    <p class="text-center text-[11px] font-semibold text-white bg-slate-900/70 py-1 px-2 rounded">Sejajarkan 4 kotak hitam sudut LJK di dalam bingkai</p>
+                                    <div class="flex justify-between">
+                                        <span class="w-5 h-5 border-b-4 border-l-4 border-emerald-400"></span>
+                                        <span class="w-5 h-5 border-b-4 border-r-4 border-emerald-400"></span>
+                                    </div>
+                                </div>
+                                <div id="camera-placeholder" class="text-center p-6 text-slate-400">
+                                    <i data-lucide="video-off" class="w-10 h-10 mx-auto mb-2 opacity-50"></i>
+                                    <p class="text-xs">Kamera belum aktif. Klik "Aktifkan Kamera" untuk mulai memindai LJK fisik.</p>
+                                </div>
+                            </div>
+
+                            <div class="mt-4 flex gap-2">
+                                <input type="text" id="cam-student-name" placeholder="Nama Siswa (Opsional jika pakai QR)" class="flex-1 text-xs px-3 py-2 border border-slate-300 rounded-xl focus:outline-none focus:border-blue-500">
+                                <button id="btn-capture-cam" onclick="captureFromCamera()" disabled class="bg-emerald-600 disabled:bg-slate-300 hover:bg-emerald-700 text-white text-xs font-bold px-4 py-2 rounded-xl transition flex items-center gap-1.5">
+                                    <i data-lucide="aperture" class="w-4 h-4"></i>
+                                    <span>Potret & Masukkan Antrean</span>
+                                </button>
+                            </div>
+                        </div>
+
+                        <!-- METODE B & C: UPLOAD FOTO / PDF & BATCH SCANNING -->
+                        <div class="bg-white p-6 rounded-2xl border border-slate-200/80 shadow-sm flex flex-col justify-between">
+                            <div>
+                                <div class="flex items-center gap-2.5 mb-3">
+                                    <div class="w-9 h-9 rounded-xl bg-indigo-50 text-indigo-600 flex items-center justify-center"><i data-lucide="upload-cloud" class="w-5 h-5"></i></div>
+                                    <div>
+                                        <h4 class="font-bold text-slate-800 text-sm">B & C. Upload Foto / PDF & Batch Scanning Massal</h4>
+                                        <p class="text-[11px] text-slate-500">Unggah 10, 20, 50, hingga 100 lembar LJK (JPG, PNG, PDF multi-halaman)</p>
+                                    </div>
+                                </div>
+
+                                <label id="drop-zone" class="mt-2 border-2 border-dashed border-blue-300 hover:border-blue-500 bg-blue-50/30 hover:bg-blue-50/60 transition rounded-2xl p-8 flex flex-col items-center justify-center text-center cursor-pointer min-h-[240px]">
+                                    <div class="w-14 h-14 rounded-2xl bg-blue-100 text-blue-600 flex items-center justify-center mb-3">
+                                        <i data-lucide="files" class="w-7 h-7"></i>
+                                    </div>
+                                    <p class="text-sm font-bold text-slate-800">Klik untuk Pilih Banyak File atau Tarik ke Sini</p>
+                                    <p class="text-xs text-slate-500 mt-1 max-w-sm">Mendukung JPG, JPEG, PNG, dan file PDF berisi banyak halaman LJK sekaligus.</p>
+                                    <span class="mt-4 text-xs bg-blue-600 text-white font-semibold px-4 py-2 rounded-xl shadow-sm">Pilih File LJK (Hingga 100 Lembar)</span>
+                                    <input type="file" id="batch-file-input" multiple accept="image/jpeg,image/png,image/jpg,application/pdf" onchange="handleBatchFilesUpload(event)" class="hidden">
+                                </label>
+                            </div>
+
+                            <div class="mt-4 p-3.5 rounded-xl bg-slate-50 border border-slate-200 text-xs text-slate-600 flex items-start gap-2.5">
+                                <i data-lucide="shield-check" class="w-4 h-4 text-emerald-600 shrink-0 mt-0.5"></i>
+                                <div>
+                                    <p class="font-semibold text-slate-800">Anti-Duplikasi & Antrean Pintar Aktif</p>
+                                    <p class="text-[11px] mt-0.5">Setiap lembar diperiksa kode uniknya agar tidak terhitung dua kali. Jawaban ganda atau ragu-ragu otomatis ditandai <strong>PERLU VERIFIKASI</strong>.</p>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- ANTREAN PEMINDAIAN (SCANNING QUEUE & PROGRESS) -->
+                    <div class="bg-white p-6 rounded-2xl border border-slate-200/80 shadow-sm">
+                        <div class="flex flex-wrap items-center justify-between gap-3 mb-4">
+                            <div>
+                                <h4 class="font-bold text-slate-800 text-base">Antrean Pemindaian Massal (Scanning Queue)</h4>
+                                <p id="queue-summary-text" class="text-xs text-slate-500">Belum ada lembar dalam antrean saat ini.</p>
+                            </div>
+                            <div class="flex items-center gap-2">
+                                <button onclick="clearScanQueue()" class="text-xs bg-slate-100 hover:bg-slate-200 text-slate-700 font-medium px-3 py-2 rounded-xl">Bersihkan Antrean</button>
+                                <button onclick="navigate('results')" class="text-xs bg-emerald-600 hover:bg-emerald-700 text-white font-semibold px-3.5 py-2 rounded-xl">Lihat Semua Hasil Koreksi &rarr;</button>
+                            </div>
+                        </div>
+
+                        <!-- Progress Bar -->
+                        <div class="w-full bg-slate-100 rounded-full h-3 mb-4 overflow-hidden border border-slate-200">
+                            <div id="queue-progress-bar" class="bg-blue-600 h-full transition-all duration-300" style="width: 0%"></div>
+                        </div>
+
+                        <!-- Queue Items List -->
+                        <div id="queue-list" class="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-3 max-h-96 overflow-y-auto">
+                            <div class="col-span-full text-center py-8 text-xs text-slate-400">
+                                Unggah foto/PDF LJK atau pindai melalui kamera untuk memulai antrean otomatis.
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            `;
+
+            // Drag and drop support
+            const dropZone = document.getElementById('drop-zone');
+            if (dropZone) {
+                dropZone.addEventListener('dragover', (e) => { e.preventDefault(); dropZone.classList.add('border-blue-600', 'bg-blue-50'); });
+                dropZone.addEventListener('dragleave', () => { dropZone.classList.remove('border-blue-600', 'bg-blue-50'); });
+                dropZone.addEventListener('drop', (e) => {
+                    e.preventDefault();
+                    dropZone.classList.remove('border-blue-600', 'bg-blue-50');
+                    if (e.dataTransfer.files.length) {
+                        handleBatchFilesUpload({ target: { files: e.dataTransfer.files } });
+                    }
+                });
+            }
+
+            renderQueueUI();
+        }
+
+        // Kontrol Kamera
+        async function startCamera() {
+            try {
+                cameraStream = await navigator.mediaDevices.getUserMedia({
+                    video: { facingMode: 'environment', width: { ideal: 1280 }, height: { ideal: 1700 } }
+                });
+                const video = document.getElementById('scanner-video');
+                video.srcObject = cameraStream;
+                video.classList.remove('hidden');
+                document.getElementById('camera-guide').classList.remove('hidden');
+                document.getElementById('camera-placeholder').classList.add('hidden');
+                document.getElementById('btn-start-cam').classList.add('hidden');
+                document.getElementById('btn-stop-cam').classList.remove('hidden');
+                document.getElementById('btn-capture-cam').disabled = false;
+                showToast('Kamera Aktif', 'Arahkan kamera ke lembar jawaban LJK.', 'info');
+            } catch (err) {
+                showToast('Gagal Mengakses Kamera', 'Pastikan izin kamera diberikan di browser Anda.', 'error');
+            }
+        }
+
+        function stopCamera() {
+            if (cameraStream) {
+                cameraStream.getTracks().forEach(t => t.stop());
+                cameraStream = null;
+            }
+            const video = document.getElementById('scanner-video');
+            if (video) {
+                video.classList.add('hidden');
+                document.getElementById('camera-guide').classList.add('hidden');
+                document.getElementById('camera-placeholder').classList.remove('hidden');
+                document.getElementById('btn-start-cam').classList.remove('hidden');
+                document.getElementById('btn-stop-cam').classList.add('hidden');
+                document.getElementById('btn-capture-cam').disabled = true;
+            }
+        }
+
+        function captureFromCamera() {
+            const video = document.getElementById('scanner-video');
+            if (!video || !video.videoWidth) return;
+
+            const canvas = document.createElement('canvas');
+            canvas.width = video.videoWidth;
+            canvas.height = video.videoHeight;
+            canvas.getContext('2d').drawImage(video, 0, 0);
+
+            const manualName = document.getElementById('cam-student-name').value.trim();
+            document.getElementById('cam-student-name').value = '';
+
+            enqueueScanItem({
+                name: manualName || `Kamera_${new Date().toLocaleTimeString('id-ID')}`,
+                sourceCanvas: canvas,
+                meta: manualName ? { studentName: manualName } : {}
+            });
+        }
+
+        // Upload Banyak File (JPG, PNG, dan PDF Multi-Halaman)
+        async function handleBatchFilesUpload(event) {
+            const files = Array.from(event.target.files || []);
+            if (!files.length) return;
+
+            showToast('Membaca Berkas...', `Memuat ${files.length} berkas ke dalam antrean pemindaian.`, 'info');
+
+            for (const file of files) {
+                if (file.type === 'application/pdf') {
+                    await extractPdfPagesToQueue(file);
+                } else if (file.type.startsWith('image/')) {
+                    const canvas = await loadImageFileToCanvas(file);
+                    const baseName = file.name.replace(/\.[^/.]+$/, '');
+                    enqueueScanItem({
+                        name: file.name,
+                        sourceCanvas: canvas,
+                        meta: { studentName: baseName }
+                    });
+                }
+            }
+        }
+
+        function loadImageFileToCanvas(file) {
+            return new Promise((resolve) => {
+                const reader = new FileReader();
+                reader.onload = (e) => {
+                    const img = new Image();
+                    img.onload = () => {
+                        const c = document.createElement('canvas');
+                        c.width = img.width;
+                        c.height = img.height;
+                        c.getContext('2d').drawImage(img, 0, 0);
+                        resolve(c);
+                    };
+                    img.src = e.target.result;
+                };
+                reader.readAsDataURL(file);
+            });
+        }
+
+        async function extractPdfPagesToQueue(pdfFile) {
+            try {
+                const arrayBuffer = await pdfFile.arrayBuffer();
+                const pdf = await pdfjsLib.getDocument({ data: arrayBuffer }).promise;
+                for (let pageNum = 1; pageNum <= pdf.numPages; pageNum++) {
+                    const page = await pdf.getPage(pageNum);
+                    const viewport = page.getViewport({ scale: 2.0 });
+                    const canvas = document.createElement('canvas');
+                    canvas.width = viewport.width;
+                    canvas.height = viewport.height;
+                    await page.render({ canvasContext: canvas.getContext('2d'), viewport }).promise;
+
+                    enqueueScanItem({
+                        name: `${pdfFile.name} (Hal ${pageNum})`,
+                        sourceCanvas: canvas,
+                        meta: { studentName: `${pdfFile.name.replace('.pdf', '')}_Hal_${pageNum}` }
+                    });
+                }
+            } catch (err) {
+                showToast('Gagal Membaca PDF', `File ${pdfFile.name} rusak atau terproteksi.`, 'error');
+            }
+        }
+
+        // Simulasi Batch Scanning 15 Lembar Sekaligus dengan OMR Real-Time
+        function simulateBatchScan(count) {
+            const exam = getActiveExam();
+            if (!exam) return;
+
+            const firstNames = ['Aditya', 'Bagas', 'Citra', 'Dewi', 'Eka', 'Farhan', 'Gita', 'Hendra', 'Intan', 'Joko', 'Kartika', 'Lutfi', 'Maya', 'Naufal', 'Putri'];
+            const lastNames = ['Saputra', 'Wijaya', 'Kusuma', 'Pratiwi', 'Hidayat', 'Santoso', 'Nugroho', 'Rahmawati', 'Permana', 'Lestari'];
+
+            for (let i = 0; i < count; i++) {
+                const num = `BATCH-${String(i + 1).padStart(3, '0')}`;
+                const name = `${firstNames[i % firstNames.length]} ${lastNames[(i * 3) % lastNames.length]}`;
+                const answers = exam.answerKey.map((k, qIdx) => {
+                    if (i === 2 && qIdx === 0) return 'DOUBLE'; // Simulasi jawaban ganda
+                    return Math.random() > 0.22 ? k.answer : ['A', 'B', 'C', 'D'][(qIdx + i) % 4];
+                });
+
+                const canvas = renderSyntheticOmrCanvas(exam, { name, num, cls: exam.className, answers });
+                enqueueScanItem({
+                    name: `LJK_${num}_${name}.png`,
+                    sourceCanvas: canvas,
+                    meta: { studentName: name, studentNumber: num, studentClass: exam.className }
+                });
+            }
+        }
+
+        function enqueueScanItem(item) {
+            scanQueue.push({
+                id: 'Q-' + Date.now() + '-' + Math.random().toString(36).slice(2, 6),
+                name: item.name,
+                status: 'pending',
+                sourceCanvas: item.sourceCanvas,
+                meta: item.meta || {},
+                result: null
+            });
+            renderQueueUI();
+            if (!isProcessingQueue) {
+                processScanQueue();
+            }
+        }
+
+        async function processScanQueue() {
+            if (isProcessingQueue) return;
+            isProcessingQueue = true;
+            const exam = getActiveExam();
+
+            while (scanQueue.some(q => q.status === 'pending')) {
+                const nextItem = scanQueue.find(q => q.status === 'pending');
+                if (!nextItem) break;
+
+                nextItem.status = 'processing';
+                renderQueueUI();
+
+                // Beri jeda micro-task 40ms agar UI progress bar tetap responsif & tidak membekukan browser
+                await new Promise(r => setTimeout(r, 40));
+
+                try {
+                    const omrOut = await processImageWithOMR(nextItem.sourceCanvas, exam, nextItem.meta);
+
+                    // Validasi Anti-Duplikasi Lembar
+                    const isDuplicate = AppState.results.some(r => r.sheetUid === omrOut.sheetUid);
+                    if (isDuplicate) {
+                        nextItem.status = 'duplicate';
+                        nextItem.result = omrOut;
+                    } else {
+                        const graded = gradeStudentAnswers(exam, omrOut.answers, omrOut.statuses);
+                        const record = {
+                            id: 'RES-' + Date.now() + '-' + Math.random().toString(36).slice(2, 5),
+                            examId: exam.id,
+                            sheetUid: omrOut.sheetUid,
+                            studentName: omrOut.studentName,
+                            studentClass: omrOut.studentClass,
+                            studentNumber: omrOut.studentNumber,
+                            ...graded,
+                            scannedAt: new Date().toLocaleString('id-ID'),
+                            imageDataUrl: omrOut.overlayDataUrl
+                        };
+
+                        AppState.results.unshift(record);
+                        nextItem.result = record;
+                        nextItem.status = record.needsVerification ? 'verify' : 'success';
+                        await saveState();
+                    }
+                } catch (err) {
+                    console.error(err);
+                    nextItem.status = 'error';
+                }
+
+                renderQueueUI();
+            }
+
+            isProcessingQueue = false;
+            showToast('Pemindaian Antrean Selesai', 'Seluruh lembar jawaban telah diproses dan dikoreksi otomatis.', 'success');
+        }
+
+        function clearScanQueue() {
+            if (isProcessingQueue) return;
+            scanQueue = [];
+            renderQueueUI();
+        }
+
+        function renderQueueUI() {
+            const listEl = document.getElementById('queue-list');
+            const barEl = document.getElementById('queue-progress-bar');
+            const summaryEl = document.getElementById('queue-summary-text');
+            if (!listEl || !barEl || !summaryEl) return;
+
+            if (scanQueue.length === 0) {
+                barEl.style.width = '0%';
+                summaryEl.textContent = 'Belum ada lembar dalam antrean saat ini.';
+                listEl.innerHTML = `<div class="col-span-full text-center py-8 text-xs text-slate-400">Unggah foto/PDF LJK atau pindai melalui kamera untuk memulai antrean otomatis.</div>`;
+                return;
+            }
+
+            const doneCount = scanQueue.filter(q => q.status !== 'pending' && q.status !== 'processing').length;
+            const pct = Math.round((doneCount / scanQueue.length) * 100);
+            barEl.style.width = `${pct}%`;
+            summaryEl.textContent = `Progres: ${doneCount} dari ${scanQueue.length} lembar selesai dipindai (${pct}%)`;
+
+            const badgeMap = {
+                pending: '<span class="px-2 py-0.5 rounded-full text-[10px] font-semibold bg-slate-100 text-slate-600">Menunggu</span>',
+                processing: '<span class="px-2 py-0.5 rounded-full text-[10px] font-semibold bg-blue-100 text-blue-700 animate-pulse">Memindai OMR...</span>',
+                success: '<span class="px-2 py-0.5 rounded-full text-[10px] font-semibold bg-emerald-100 text-emerald-700">Berhasil</span>',
+                verify: '<span class="px-2 py-0.5 rounded-full text-[10px] font-semibold bg-amber-100 text-amber-800">Perlu Verifikasi</span>',
+                duplicate: '<span class="px-2 py-0.5 rounded-full text-[10px] font-semibold bg-purple-100 text-purple-700">Duplikat Diabaikan</span>',
+                error: '<span class="px-2 py-0.5 rounded-full text-[10px] font-semibold bg-rose-100 text-rose-700">Gagal Baca</span>'
+            };
+
+            listEl.innerHTML = scanQueue.map(item => `
+                <div class="p-3 rounded-xl border border-slate-200 bg-slate-50/50 flex items-center justify-between gap-2">
+                    <div class="min-w-0">
+                        <p class="text-xs font-bold text-slate-800 truncate">${item.result?.studentName || item.name}</p>
+                        <p class="text-[11px] text-slate-500">
+                            ${item.result && item.status !== 'duplicate' ? `Nilai: <strong>${item.result.score}</strong> (${item.result.correctCount} Benar)` : item.name}
+                        </p>
+                    </div>
+                    <div class="flex items-center gap-1.5 shrink-0">
+                        ${badgeMap[item.status]}
+                        ${item.result && item.status !== 'duplicate' ? `
+                            <button onclick="openStudentDetailModal('${item.result.id}')" class="p-1.5 bg-white border border-slate-200 rounded-lg hover:bg-blue-50 text-blue-600" title="Periksa Detail & Hasil Scan">
+                                <i data-lucide="eye" class="w-3.5 h-3.5"></i>
+                            </button>
+                        ` : ''}
+                    </div>
+                </div>
+            `).join('');
+            lucide.createIcons();
+        }
+
+        // ============================================================================
+        // 11. VIEW 5: HASIL KOREKSI & VERIFIKASI MANUAL
+        // ============================================================================
+        let resultFilter = { search: '', classFilter: 'ALL', sortBy: 'newest', onlyVerify: false };
+
+        function renderResults(container) {
+            const exam = getActiveExam();
+            if (!exam) {
+                container.innerHTML = `<div class="bg-white p-8 rounded-2xl text-center">Silakan buat ujian terlebih dahulu.</div>`;
+                return;
+            }
+
+            let list = AppState.results.filter(r => r.examId === exam.id);
+            const classes = ['ALL', ...new Set(list.map(r => r.studentClass))];
+
+            if (resultFilter.search) {
+                const q = resultFilter.search.toLowerCase();
+                list = list.filter(r => r.studentName.toLowerCase().includes(q) || r.studentNumber.toLowerCase().includes(q));
+            }
+            if (resultFilter.classFilter !== 'ALL') {
+                list = list.filter(r => r.studentClass === resultFilter.classFilter);
+            }
+            if (resultFilter.onlyVerify) {
+                list = list.filter(r => r.needsVerification);
+            }
+
+            if (resultFilter.sortBy === 'highest') list.sort((a, b) => b.score - a.score);
+            else if (resultFilter.sortBy === 'lowest') list.sort((a, b) => a.score - b.score);
+            else if (resultFilter.sortBy === 'name') list.sort((a, b) => a.studentName.localeCompare(b.studentName));
+
+            container.innerHTML = `
+                <div class="space-y-5">
+                    <!-- Filter & Search Bar -->
+                    <div class="bg-white p-4 rounded-2xl border border-slate-200/80 shadow-sm flex flex-wrap items-center justify-between gap-3">
+                        <div class="flex flex-wrap items-center gap-2.5 flex-1">
+                            <div class="relative min-w-[220px] flex-1 sm:flex-initial">
+                                <i data-lucide="search" class="w-4 h-4 text-slate-400 absolute left-3 top-2.5"></i>
+                                <input type="text" placeholder="Cari nama / nomor peserta..." value="${resultFilter.search}"
+                                    oninput="resultFilter.search=this.value; renderCurrentRoute();"
+                                    class="w-full pl-9 pr-3 py-2 text-xs border border-slate-300 rounded-xl focus:outline-none focus:border-blue-500">
+                            </div>
+
+                            <select onchange="resultFilter.classFilter=this.value; renderCurrentRoute();" class="text-xs border border-slate-300 rounded-xl px-3 py-2 bg-white">
+                                ${classes.map(c => `<option value="${c}" ${resultFilter.classFilter === c ? 'selected' : ''}>${c === 'ALL' ? 'Semua Kelas' : 'Kelas ' + c}</option>`).join('')}
+                            </select>
+
+                            <select onchange="resultFilter.sortBy=this.value; renderCurrentRoute();" class="text-xs border border-slate-300 rounded-xl px-3 py-2 bg-white">
+                                <option value="newest" ${resultFilter.sortBy === 'newest' ? 'selected' : ''}>Urutkan: Terbaru</option>
+                                <option value="highest" ${resultFilter.sortBy === 'highest' ? 'selected' : ''}>Nilai Tertinggi</option>
+                                <option value="lowest" ${resultFilter.sortBy === 'lowest' ? 'selected' : ''}>Nilai Terendah</option>
+                                <option value="name" ${resultFilter.sortBy === 'name' ? 'selected' : ''}>Nama A-Z</option>
+                            </select>
+
+                            <label class="flex items-center gap-1.5 text-xs font-medium text-amber-800 bg-amber-50 border border-amber-200 px-3 py-2 rounded-xl cursor-pointer">
+                                <input type="checkbox" ${resultFilter.onlyVerify ? 'checked' : ''} onchange="resultFilter.onlyVerify=this.checked; renderCurrentRoute();">
+                                <span>Hanya Perlu Verifikasi</span>
+                            </label>
+                        </div>
+
+                        <div class="text-xs text-slate-500 font-medium">
+                            Menampilkan <strong>${list.length}</strong> siswa
+                        </div>
+                    </div>
+
+                    <!-- Tabel Hasil Koreksi -->
+                    <div class="bg-white rounded-2xl border border-slate-200/80 shadow-sm overflow-hidden">
+                        <div class="overflow-x-auto">
+                            <table class="w-full text-left border-collapse">
+                                <thead>
+                                    <tr class="bg-slate-50 border-b border-slate-200 text-[11px] font-bold text-slate-500 uppercase">
+                                        <th class="py-3 px-4">No</th>
+                                        <th class="py-3 px-4">Nama Siswa</th>
+                                        <th class="py-3 px-3">Kelas</th>
+                                        <th class="py-3 px-3 text-center">Benar</th>
+                                        <th class="py-3 px-3 text-center">Salah</th>
+                                        <th class="py-3 px-3 text-center">Kosong</th>
+                                        <th class="py-3 px-3 text-center">Total Point</th>
+                                        <th class="py-3 px-3 text-center">Nilai</th>
+                                        <th class="py-3 px-3 text-center">Status</th>
+                                        <th class="py-3 px-4 text-right">Aksi</th>
+                                    </tr>
+                                </thead>
+                                <tbody class="divide-y divide-slate-100 text-xs">
+                                    ${list.length === 0 ? `
+                                        <tr><td colspan="10" class="py-10 text-center text-slate-400">Belum ada data hasil koreksi yang sesuai filter.</td></tr>
+                                    ` : list.map((r, idx) => `
+                                        <tr class="hover:bg-blue-50/30 transition">
+                                            <td class="py-3 px-4 font-semibold text-slate-500">${idx + 1}</td>
+                                            <td class="py-3 px-4">
+                                                <p class="font-bold text-slate-800">${r.studentName}</p>
+                                                <p class="text-[10px] font-mono text-slate-400">${r.studentNumber}</p>
+                                            </td>
+                                            <td class="py-3 px-3 font-medium text-slate-700">${r.studentClass}</td>
+                                            <td class="py-3 px-3 text-center font-bold text-emerald-600">${r.correctCount}</td>
+                                            <td class="py-3 px-3 text-center font-bold text-rose-600">${r.wrongCount}</td>
+                                            <td class="py-3 px-3 text-center font-semibold text-slate-500">${r.emptyCount + r.doubleCount}</td>
+                                            <td class="py-3 px-3 text-center font-mono font-semibold text-slate-700">${r.pointsEarned} / ${r.maxPoints}</td>
+                                            <td class="py-3 px-3 text-center">
+                                                <span class="px-2.5 py-1 rounded-lg font-extrabold ${r.score >= AppState.settings.kkm ? 'bg-emerald-100 text-emerald-800' : 'bg-rose-100 text-rose-800'}">
+                                                    ${r.score}
+                                                </span>
+                                            </td>
+                                            <td class="py-3 px-3 text-center">
+                                                ${r.needsVerification
+                                                    ? `<span class="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-bold bg-amber-100 text-amber-800"><i data-lucide="alert-triangle" class="w-3 h-3"></i> Perlu Verifikasi</span>`
+                                                    : `<span class="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-bold bg-blue-50 text-blue-700">Terverifikasi</span>`}
+                                            </td>
+                                            <td class="py-3 px-4 text-right">
+                                                <div class="inline-flex items-center gap-1">
+                                                    <button onclick="openStudentDetailModal('${r.id}')" class="px-2.5 py-1.5 bg-blue-600 hover:bg-blue-700 text-white rounded-lg text-[11px] font-semibold transition">
+                                                        Detail & Koreksi
+                                                    </button>
+                                                    <button onclick="deleteResult('${r.id}')" class="p-1.5 text-rose-500 hover:bg-rose-50 rounded-lg" title="Hapus">
+                                                        <i data-lucide="trash-2" class="w-3.5 h-3.5"></i>
+                                                    </button>
+                                                </div>
+                                            </td>
+                                        </tr>
+                                    `).join('')}
+                                </tbody>
+                            </table>
+                        </div>
+                    </div>
+                </div>
+            `;
+        }
+
+        function deleteResult(resId) {
+            AppState.results = AppState.results.filter(r => r.id !== resId);
+            saveState();
+            renderCurrentRoute();
+            showToast('Data Dihapus', 'Hasil koreksi siswa telah dihapus.', 'warning');
+        }
+
+        // Modal Detail Jawaban Siswa, Preview Citra Hasil Scan & Koreksi Manual
+        function openStudentDetailModal(resultId) {
+            const res = AppState.results.find(r => r.id === resultId);
+            const exam = AppState.exams.find(e => e.id === res?.examId);
+            if (!res || !exam) return;
+
+            const rowsHtml = exam.answerKey.map((k, idx) => {
+                const sAns = res.answers[idx] || '';
+                const st = res.statuses[idx] || 'OK';
+                const isCorrect = sAns === k.answer && st !== 'DOUBLE';
+
+                return `
+                    <tr class="border-b border-slate-100 ${st === 'VERIFY' || st === 'DOUBLE' ? 'bg-amber-50' : ''}">
+                        <td class="py-2 px-3 font-bold text-xs">${k.no}</td>
+                        <td class="py-2 px-3">
+                            <div class="flex items-center gap-1">
+                                ${['A', 'B', 'C', 'D'].map(opt => `
+                                    <button onclick="manualOverrideAnswer('${res.id}', ${idx}, '${opt}')"
+                                        class="w-6 h-6 rounded-full text-[11px] font-bold ${sAns === opt ? 'bg-blue-600 text-white' : 'bg-slate-100 text-slate-600 hover:bg-slate-200'}">
+                                        ${opt}
+                                    </button>
+                                `).join('')}
+                                <button onclick="manualOverrideAnswer('${res.id}', ${idx}, '')"
+                                    class="px-2 h-6 rounded-full text-[10px] font-semibold ${sAns === '' ? 'bg-slate-700 text-white' : 'bg-slate-100 text-slate-500'}">
+                                    Kosong
+                                </button>
+                            </div>
+                        </td>
+                        <td class="py-2 px-3 text-center font-bold text-xs text-blue-700">${k.answer}</td>
+                        <td class="py-2 px-3 text-center text-xs">
+                            ${st === 'DOUBLE' ? '<span class="text-rose-600 font-bold">Ganda (0 pt)</span>' :
+                              st === 'VERIFY' ? '<span class="text-amber-700 font-bold">Ragu (Cek)</span>' :
+                              isCorrect ? `<span class="text-emerald-600 font-bold">+${k.points} pt</span>` : '<span class="text-rose-500">0 pt</span>'}
+                        </td>
+                    </tr>
+                `;
+            }).join('');
+
+            openModal(`
+                <div class="space-y-4">
+                    <div class="flex items-start justify-between border-b border-slate-200 pb-3">
+                        <div>
+                            <h3 class="font-bold text-slate-800 text-base">Detail Lembar Jawaban & Koreksi Manual</h3>
+                            <p class="text-xs text-slate-500">Klik pilihan A/B/C/D jika perlu memperbaiki pembacaan scanner secara manual.</p>
+                        </div>
+                        <button onclick="closeModal()" class="p-1.5 text-slate-400 hover:text-slate-700 rounded-lg"><i data-lucide="x" class="w-5 h-5"></i></button>
+                    </div>
+
+                    <!-- Edit Identitas Siswa -->
+                    <div class="grid grid-cols-1 sm:grid-cols-3 gap-3 bg-slate-50 p-3 rounded-xl border border-slate-200">
+                        <div>
+                            <label class="text-[10px] font-bold text-slate-500 uppercase">Nama Siswa</label>
+                            <input type="text" value="${res.studentName}" onchange="updateStudentMeta('${res.id}', 'studentName', this.value)" class="w-full text-xs font-bold px-2.5 py-1.5 border border-slate-300 rounded-lg mt-0.5">
+                        </div>
+                        <div>
+                            <label class="text-[10px] font-bold text-slate-500 uppercase">Nomor Peserta</label>
+                            <input type="text" value="${res.studentNumber}" onchange="updateStudentMeta('${res.id}', 'studentNumber', this.value)" class="w-full text-xs font-mono font-bold px-2.5 py-1.5 border border-slate-300 rounded-lg mt-0.5">
+                        </div>
+                        <div>
+                            <label class="text-[10px] font-bold text-slate-500 uppercase">Nilai Akhir</label>
+                            <div class="text-lg font-extrabold text-blue-600 mt-0.5">${res.score} <span class="text-xs font-normal text-slate-500">(${res.pointsEarned}/${res.maxPoints} pt)</span></div>
+                        </div>
+                    </div>
+
+                    <div class="grid grid-cols-1 ${res.imageDataUrl ? 'md:grid-cols-2' : ''} gap-4">
+                        <!-- Tabel Perbandingan Jawaban -->
+                        <div class="max-h-96 overflow-y-auto border border-slate-200 rounded-xl">
+                            <table class="w-full text-left border-collapse">
+                                <thead class="sticky top-0 bg-slate-100 text-[10px] font-bold text-slate-600 uppercase">
+                                    <tr>
+                                        <th class="py-2 px-3">No</th>
+                                        <th class="py-2 px-3">Jawaban Siswa</th>
+                                        <th class="py-2 px-3 text-center">Kunci</th>
+                                        <th class="py-2 px-3 text-center">Status/Point</th>
+                                    </tr>
+                                </thead>
+                                <tbody>${rowsHtml}</tbody>
+                            </table>
+                        </div>
+
+                        <!-- Preview Citra Hasil Deteksi OMR -->
+                        ${res.imageDataUrl ? `
+                            <div class="border border-slate-200 rounded-xl p-2 bg-slate-100 flex flex-col items-center">
+                                <span class="text-[10px] font-bold text-slate-600 mb-1.5">Hasil Deteksi OMR (Hijau=Benar, Merah=Salah/Ganda, Kuning=Ragu)</span>
+                                <img src="${res.imageDataUrl}" class="max-h-80 object-contain rounded border border-slate-300 bg-white">
+                            </div>
+                        ` : ''}
+                    </div>
+
+                    <div class="flex justify-end gap-2 pt-2 border-t border-slate-200">
+                        <button onclick="markResultVerified('${res.id}')" class="bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-semibold px-4 py-2 rounded-xl">
+                            Tandai Sudah Diverifikasi & Tutup
+                        </button>
+                    </div>
+                </div>
+            `);
+        }
+
+        function updateStudentMeta(resId, field, value) {
+            const res = AppState.results.find(r => r.id === resId);
+            if (!res) return;
+            res[field] = value.trim();
+            saveState();
+            renderCurrentRoute();
+        }
+
+        function manualOverrideAnswer(resId, qIdx, newOpt) {
+            const res = AppState.results.find(r => r.id === resId);
+            const exam = AppState.exams.find(e => e.id === res?.examId);
+            if (!res || !exam) return;
+
+            res.answers[qIdx] = newOpt;
+            res.statuses[qIdx] = newOpt === '' ? 'EMPTY' : 'OK';
+            const updated = gradeStudentAnswers(exam, res.answers, res.statuses);
+            Object.assign(res, updated);
+            saveState();
+            openStudentDetailModal(resId);
+            renderCurrentRoute();
+        }
+
+        function markResultVerified(resId) {
+            const res = AppState.results.find(r => r.id === resId);
+            if (res) {
+                res.statuses = res.statuses.map(s => s === 'VERIFY' ? 'OK' : s);
+                res.needsVerification = false;
+                saveState();
+                renderCurrentRoute();
+            }
+            closeModal();
+        }
+
+        // ============================================================================
+        // 12. VIEW 6: REKAP NILAI, ANALISIS BUTIR SOAL & EKSPOR EXCEL / PDF
+        // ============================================================================
+        let analyticsItemChart = null;
+
+        function renderAnalytics(container) {
+            const exam = getActiveExam();
+            if (!exam) {
+                container.innerHTML = `<div class="bg-white p-8 rounded-2xl text-center">Silakan buat ujian terlebih dahulu.</div>`;
+                return;
+            }
+
+            const results = AppState.results.filter(r => r.examId === exam.id);
+            const kkm = AppState.settings.kkm;
+            const passedCount = results.filter(r => r.score >= kkm).length;
+            const failedCount = results.length - passedCount;
+            const passRate = results.length ? ((passedCount / results.length) * 100).toFixed(1) : '0.0';
+            const avgScore = results.length ? (results.reduce((s, r) => s + r.score, 0) / results.length).toFixed(1) : '0.0';
+
+            // Analisis Butir Soal
+            const itemAnalysis = exam.answerKey.map((k, idx) => {
+                let correct = 0;
+                let wrong = 0;
+                let empty = 0;
+                results.forEach(r => {
+                    const ans = r.answers[idx];
+                    if (!ans || ans === 'EMPTY') empty++;
+                    else if (ans === k.answer) correct++;
+                    else wrong++;
+                });
+                const pctCorrect = results.length ? Math.round((correct / results.length) * 100) : 0;
+                let category = 'Sedang';
+                if (pctCorrect >= 75) category = 'Mudah';
+                else if (pctCorrect < 40) category = 'Sukar';
+
+                return { no: k.no, key: k.answer, points: k.points, correct, wrong, empty, pctCorrect, category };
+            });
+
+            container.innerHTML = `
+                <div class="space-y-6">
+                    <!-- Tombol Ekspor -->
+                    <div class="bg-white p-5 rounded-2xl border border-slate-200/80 shadow-sm flex flex-wrap items-center justify-between gap-4">
+                        <div>
+                            <h3 class="font-bold text-slate-800">Rekapitulasi Nilai & Analisis Butir Soal</h3>
+                            <p class="text-xs text-slate-500">${exam.examName} • ${exam.subject} • KKM: <strong>${kkm}</strong></p>
+                        </div>
+                        <div class="flex flex-wrap items-center gap-2">
+                            <button onclick="exportResultsToExcel()" class="text-xs bg-emerald-600 hover:bg-emerald-700 text-white font-semibold px-3.5 py-2.5 rounded-xl transition flex items-center gap-1.5">
+                                <i data-lucide="file-spreadsheet" class="w-4 h-4"></i>
+                                <span>Download Excel (.xlsx)</span>
+                            </button>
+                            <button onclick="exportRecapToPdf()" class="text-xs bg-rose-600 hover:bg-rose-700 text-white font-semibold px-3.5 py-2.5 rounded-xl transition flex items-center gap-1.5">
+                                <i data-lucide="file-text" class="w-4 h-4"></i>
+                                <span>Download Rekap PDF</span>
+                            </button>
+                            <button onclick="window.print()" class="text-xs bg-slate-800 hover:bg-slate-900 text-white font-semibold px-3.5 py-2.5 rounded-xl transition flex items-center gap-1.5">
+                                <i data-lucide="printer" class="w-4 h-4"></i>
+                                <span>Cetak Laporan</span>
+                            </button>
+                        </div>
+                    </div>
+
+                    <!-- Ringkasan Ketuntasan -->
+                    <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+                        <div class="bg-white p-5 rounded-2xl border border-slate-200/80 shadow-sm">
+                            <p class="text-xs font-semibold text-slate-500">Rata-Rata Kelas</p>
+                            <p class="text-2xl font-extrabold text-blue-600 mt-2">${avgScore}</p>
+                        </div>
+                        <div class="bg-white p-5 rounded-2xl border border-slate-200/80 shadow-sm">
+                            <p class="text-xs font-semibold text-slate-500">Siswa Tuntas (&ge; ${kkm})</p>
+                            <p class="text-2xl font-extrabold text-emerald-600 mt-2">${passedCount} <span class="text-xs font-normal text-slate-400">siswa</span></p>
+                        </div>
+                        <div class="bg-white p-5 rounded-2xl border border-slate-200/80 shadow-sm">
+                            <p class="text-xs font-semibold text-slate-500">Belum Tuntas (&lt; ${kkm})</p>
+                            <p class="text-2xl font-extrabold text-rose-600 mt-2">${failedCount} <span class="text-xs font-normal text-slate-400">siswa</span></p>
+                        </div>
+                        <div class="bg-white p-5 rounded-2xl border border-slate-200/80 shadow-sm">
+                            <p class="text-xs font-semibold text-slate-500">Persentase Ketuntasan</p>
+                            <p class="text-2xl font-extrabold text-indigo-600 mt-2">${passRate}%</p>
+                        </div>
+                    </div>
+
+                    <!-- Grafik Analisis Butir Soal -->
+                    <div class="bg-white p-6 rounded-2xl border border-slate-200/80 shadow-sm">
+                        <h4 class="font-bold text-slate-800 text-sm mb-1">Grafik Persentase Jawaban Benar per Nomor Soal</h4>
+                        <p class="text-xs text-slate-500 mb-4">Membantu guru mengidentifikasi soal yang terlalu sulit atau materi yang perlu diulang</p>
+                        <div class="h-64 w-full">
+                            <canvas id="itemAnalysisChart"></canvas>
+                        </div>
+                    </div>
+
+                    <!-- Tabel Analisis Soal -->
+                    <div class="bg-white rounded-2xl border border-slate-200/80 shadow-sm overflow-hidden">
+                        <div class="p-4 border-b border-slate-200">
+                            <h4 class="font-bold text-slate-800 text-sm">Rincian Analisis Butir Soal</h4>
+                        </div>
+                        <div class="overflow-x-auto max-h-96">
+                            <table class="w-full text-left border-collapse text-xs">
+                                <thead class="bg-slate-50 border-b border-slate-200 text-[11px] font-bold text-slate-500 uppercase sticky top-0">
+                                    <tr>
+                                        <th class="py-2.5 px-4">No. Soal</th>
+                                        <th class="py-2.5 px-3 text-center">Kunci</th>
+                                        <th class="py-2.5 px-3 text-center">Bobot Point</th>
+                                        <th class="py-2.5 px-3 text-center">Menjawab Benar</th>
+                                        <th class="py-2.5 px-3 text-center">Menjawab Salah</th>
+                                        <th class="py-2.5 px-3 text-center">Kosong</th>
+                                        <th class="py-2.5 px-3 text-center">Persentase Benar</th>
+                                        <th class="py-2.5 px-4 text-right">Kategori Soal</th>
+                                    </tr>
+                                </thead>
+                                <tbody class="divide-y divide-slate-100">
+                                    ${itemAnalysis.map(it => `
+                                        <tr class="hover:bg-slate-50">
+                                            <td class="py-2.5 px-4 font-bold">Soal #${it.no}</td>
+                                            <td class="py-2.5 px-3 text-center font-bold text-blue-600">${it.key}</td>
+                                            <td class="py-2.5 px-3 text-center">${it.points}</td>
+                                            <td class="py-2.5 px-3 text-center font-bold text-emerald-600">${it.correct}</td>
+                                            <td class="py-2.5 px-3 text-center font-bold text-rose-600">${it.wrong}</td>
+                                            <td class="py-2.5 px-3 text-center text-slate-500">${it.empty}</td>
+                                            <td class="py-2.5 px-3 text-center font-bold">${it.pctCorrect}%</td>
+                                            <td class="py-2.5 px-4 text-right">
+                                                <span class="px-2 py-0.5 rounded-full text-[10px] font-bold ${
+                                                    it.category === 'Mudah' ? 'bg-emerald-100 text-emerald-700' :
+                                                    it.category === 'Sedang' ? 'bg-blue-100 text-blue-700' : 'bg-rose-100 text-rose-700'
+                                                }">${it.category}</span>
+                                            </td>
+                                        </tr>
+                                    `).join('')}
+                                </tbody>
+                            </table>
+                        </div>
+                    </div>
+                </div>
+            `;
+
+            const ctx = document.getElementById('itemAnalysisChart').getContext('2d');
+            if (analyticsItemChart) analyticsItemChart.destroy();
+            analyticsItemChart = new Chart(ctx, {
+                type: 'bar',
+                data: {
+                    labels: itemAnalysis.map(i => `No.${i.no}`),
+                    datasets: [{
+                        label: '% Siswa Menjawab Benar',
+                        data: itemAnalysis.map(i => i.pctCorrect),
+                        backgroundColor: itemAnalysis.map(i => i.pctCorrect >= 75 ? '#10b981' : (i.pctCorrect >= 40 ? '#3b82f6' : '#f43f5e')),
+                        borderRadius: 6
+                    }]
+                },
+                options: {
+                    responsive: true,
+                    maintainAspectRatio: false,
+                    scales: { y: { beginAtZero: true, max: 100 } }
+                }
+            });
+        }
+
+        function exportResultsToExcel() {
+            const exam = getActiveExam();
+            const results = AppState.results.filter(r => r.examId === exam.id);
+            if (!results.length) {
+                showToast('Belum Ada Data', 'Belum ada hasil koreksi siswa untuk diekspor.', 'warning');
+                return;
+            }
+
+            const rows = results.map((r, i) => ({
+                No: i + 1,
+                'Nomor Peserta': r.studentNumber,
+                'Nama Siswa': r.studentName,
+                Kelas: r.studentClass,
+                Benar: r.correctCount,
+                Salah: r.wrongCount,
+                Kosong: r.emptyCount,
+                Ganda: r.doubleCount,
+                'Point Diperoleh': r.pointsEarned,
+                'Point Maksimal': r.maxPoints,
+                'Nilai Akhir': r.score,
+                Keterangan: r.score >= AppState.settings.kkm ? 'TUNTAS' : 'REMEDIAL'
+            }));
+
+            const ws = XLSX.utils.json_to_sheet(rows);
+            const wb = XLSX.utils.book_new();
+            XLSX.utils.book_append_sheet(wb, ws, 'RekapNilai');
+            XLSX.writeFile(wb, `Rekap_Nilai_${exam.subject}_${exam.className}.xlsx`);
+            showToast('Excel Berhasil Diunduh', 'File rekap nilai siap dibuka di Microsoft Excel.', 'success');
+        }
+
+        function exportRecapToPdf() {
+            const exam = getActiveExam();
+            const results = AppState.results.filter(r => r.examId === exam.id);
+            if (!results.length) {
+                showToast('Belum Ada Data', 'Belum ada hasil koreksi siswa untuk diekspor.', 'warning');
+                return;
+            }
+
+            const { jsPDF } = window.jspdf;
+            const doc = new jsPDF('p', 'mm', 'a4');
+
+            doc.setFontSize(14);
+            doc.setFont(undefined, 'bold');
+            doc.text(exam.schoolName.toUpperCase(), 14, 16);
+            doc.setFontSize(11);
+            doc.text(`REKAPITULASI HASIL UJIAN: ${exam.examName}`, 14, 23);
+            doc.setFontSize(9);
+            doc.setFont(undefined, 'normal');
+            doc.text(`Mata Pelajaran: ${exam.subject} | Kelas: ${exam.className} | Guru: ${exam.teacherName} | Tanggal: ${exam.examDate}`, 14, 29);
+
+            // Table Header
+            let y = 38;
+            doc.setFillColor(241, 245, 249);
+            doc.rect(14, y - 5, 182, 8, 'F');
+            doc.setFont(undefined, 'bold');
+            doc.text('No', 16, y);
+            doc.text('No. Peserta', 26, y);
+            doc.text('Nama Siswa', 55, y);
+            doc.text('B / S / K', 125, y);
+            doc.text('Point', 150, y);
+            doc.text('Nilai', 175, y);
+
+            doc.setFont(undefined, 'normal');
+            y += 7;
+
+            results.forEach((r, idx) => {
+                if (y > 280) {
+                    doc.addPage();
+                    y = 20;
+                }
+                doc.text(String(idx + 1), 16, y);
+                doc.text(String(r.studentNumber), 26, y);
+                doc.text(String(r.studentName).slice(0, 32), 55, y);
+                doc.text(`${r.correctCount} / ${r.wrongCount} / ${r.emptyCount + r.doubleCount}`, 125, y);
+                doc.text(`${r.pointsEarned}/${r.maxPoints}`, 150, y);
+                doc.setFont(undefined, 'bold');
+                doc.text(String(r.score), 175, y);
+                doc.setFont(undefined, 'normal');
+                y += 6.5;
+            });
+
+            doc.save(`Rekap_Nilai_${exam.subject}_${exam.className}.pdf`);
+            showToast('PDF Rekap Diunduh', 'Dokumen PDF rekap nilai berhasil dibuat.', 'success');
+        }
+
+        // ============================================================================
+        // 13. VIEW 7: PENGATURAN OMR, AI VISION & BACKUP DATA
+        // ============================================================================
+        function renderSettings(container) {
+            container.innerHTML = `
+                <div class="grid grid-cols-1 lg:grid-cols-2 gap-6">
+                    <!-- Kalibrasi OMR & KKM -->
+                    <div class="bg-white p-6 rounded-2xl border border-slate-200/80 shadow-sm space-y-4">
+                        <h3 class="font-bold text-slate-800 text-base">Kalibrasi Sensor OMR & Kriteria Ketuntasan</h3>
+                        <p class="text-xs text-slate-500">Sesuaikan sensitivitas pembacaan bulatan jawaban dan standar KKM sekolah.</p>
+
+                        <div>
+                            <label class="block text-xs font-semibold text-slate-700 mb-1">Kriteria Ketuntasan Minimal (KKM)</label>
+                            <input type="number" min="0" max="100" value="${AppState.settings.kkm}"
+                                onchange="AppState.settings.kkm = Number(this.value); saveState(); showToast('Pengaturan Disimpan', 'KKM diperbarui.', 'success');"
+                                class="w-full px-3.5 py-2 text-sm border border-slate-300 rounded-xl">
+                        </div>
+
+                        <div>
+                            <div class="flex justify-between text-xs font-semibold text-slate-700 mb-1">
+                                <span>Sensitivitas Kehitaman Bulatan OMR</span>
+                                <span id="lbl-thresh">${Math.round(AppState.settings.omrThreshold * 100)}%</span>
+                            </div>
+                            <input type="range" min="0.20" max="0.65" step="0.02" value="${AppState.settings.omrThreshold}"
+                                oninput="document.getElementById('lbl-thresh').textContent = Math.round(this.value*100)+'%'"
+                                onchange="AppState.settings.omrThreshold = Number(this.value); saveState(); showToast('Kalibrasi Disimpan', 'Sensitivitas OMR diperbarui.', 'success');"
+                                class="w-full accent-blue-600">
+                            <p class="text-[11px] text-slate-400 mt-1">Turunkan jika siswa menggunakan pensil yang tipis; naikkan jika kertas LJK agak kotor.</p>
+                        </div>
+
+                        <div class="pt-3 border-t border-slate-200">
+                            <h4 class="font-bold text-slate-800 text-sm mb-1">Integrasi AI Vision (Opsional untuk Tulisan Tangan)</h4>
+                            <p class="text-xs text-slate-500 mb-3">Digunakan untuk membaca tulisan tangan Nama & Nomor Peserta pada LJK yang tidak memakai QR Code.</p>
+                            <label class="flex items-center gap-2 text-xs font-semibold text-slate-700 mb-2 cursor-pointer">
+                                <input type="checkbox" ${AppState.settings.useAiVisionForIdentity ? 'checked' : ''}
+                                    onchange="AppState.settings.useAiVisionForIdentity = this.checked; saveState();">
+                                <span>Aktifkan Pembacaan Identitas Tulisan Tangan dengan AI Vision</span>
+                            </label>
+                            <input type="password" placeholder="Masukkan Gemini API Key (Opsional)..." value="${AppState.settings.geminiApiKey}"
+                                onchange="AppState.settings.geminiApiKey = this.value.trim(); saveState(); showToast('API Key Disimpan', 'Konfigurasi AI Vision diperbarui.', 'info');"
+                                class="w-full px-3.5 py-2 text-xs border border-slate-300 rounded-xl">
+                        </div>
+                    </div>
+
+                    <!-- Backup & Pemulihan Database -->
+                    <div class="bg-white p-6 rounded-2xl border border-slate-200/80 shadow-sm space-y-4">
+                        <h3 class="font-bold text-slate-800 text-base">Cadangkan & Pulihkan Data Permanen</h3>
+                        <p class="text-xs text-slate-500">Semua ujian, kunci jawaban, dan hasil koreksi tersimpan otomatis di browser Anda. Unduh berkas cadangan secara berkala untuk keamanan maksimal.</p>
+
+                        <div class="p-4 rounded-xl bg-blue-50 border border-blue-200 flex items-center justify-between gap-3">
+                            <div>
+                                <p class="text-xs font-bold text-blue-900">Unduh Backup Database (.JSON)</p>
+                                <p class="text-[11px] text-blue-700">Simpan salinan seluruh ujian & nilai siswa ke komputer Anda.</p>
+                            </div>
+                            <button onclick="downloadBackupJson()" class="bg-blue-600 hover:bg-blue-700 text-white text-xs font-semibold px-4 py-2 rounded-xl shrink-0">
+                                Backup Sekarang
+                            </button>
+                        </div>
+
+                        <div class="p-4 rounded-xl bg-slate-50 border border-slate-200 flex items-center justify-between gap-3">
+                            <div>
+                                <p class="text-xs font-bold text-slate-800">Pulihkan Data dari File Backup</p>
+                                <p class="text-[11px] text-slate-500">Unggah file .JSON cadangan sebelumnya.</p>
+                            </div>
+                            <label class="cursor-pointer bg-slate-800 hover:bg-slate-900 text-white text-xs font-semibold px-4 py-2 rounded-xl shrink-0">
+                                Pilih File JSON
+                                <input type="file" accept=".json" onchange="restoreBackupJson(event)" class="hidden">
+                            </label>
+                        </div>
+
+                        <div class="pt-4 border-t border-slate-200">
+                            <button onclick="confirmResetAllData()" class="text-xs text-rose-600 hover:bg-rose-50 font-semibold px-3.5 py-2 rounded-xl border border-rose-200 transition">
+                                Reset & Hapus Semua Data Aplikasi
+                            </button>
+                        </div>
+                    </div>
+                </div>
+            `;
+        }
+
+        function downloadBackupJson() {
+            const payload = JSON.stringify({
+                exportedAt: new Date().toISOString(),
+                exams: AppState.exams,
+                results: AppState.results,
+                settings: AppState.settings
+            }, null, 2);
+
+            const blob = new Blob([payload], { type: 'application/json' });
+            const url = URL.createObjectURL(blob);
+            const a = document.createElement('a');
+            a.href = url;
+            a.download = `Backup_SmartExamScanner_${new Date().toISOString().split('T')[0]}.json`;
+            a.click();
+            URL.revokeObjectURL(url);
+            showToast('Backup Berhasil', 'File cadangan JSON berhasil diunduh.', 'success');
+        }
+
+        function restoreBackupJson(event) {
+            const file = event.target.files[0];
+            if (!file) return;
+            const reader = new FileReader();
+            reader.onload = async (e) => {
+                try {
+                    const data = JSON.parse(e.target.result);
+                    if (Array.isArray(data.exams) && Array.isArray(data.results)) {
+                        AppState.exams = data.exams;
+                        AppState.results = data.results;
+                        if (data.settings) AppState.settings = { ...AppState.settings, ...data.settings };
+                        AppState.activeExamId = AppState.exams[0]?.id || null;
+                        await saveState();
+                        renderCurrentRoute();
+                        showToast('Pemulihan Berhasil', `${AppState.exams.length} ujian dan ${AppState.results.length} hasil siswa dipulihkan.`, 'success');
+                    } else {
+                        throw new Error('Format tidak valid');
+                    }
+                } catch (err) {
+                    showToast('Gagal Memulihkan', 'File backup tidak valid atau rusak.', 'error');
+                }
+            };
+            reader.readAsText(file);
+        }
+
+        function confirmResetAllData() {
+            openModal(`
+                <div class="space-y-4">
+                    <h3 class="font-bold text-rose-600 text-base">Konfirmasi Hapus Semua Data</h3>
+                    <p class="text-xs text-slate-600">Tindakan ini akan menghapus seluruh paket ujian dan hasil koreksi siswa secara permanen dari perangkat ini. Pastikan Anda sudah melakukan backup terlebih dahulu.</p>
+                    <div class="flex justify-end gap-2">
+                        <button onclick="closeModal()" class="px-4 py-2 text-xs font-semibold bg-slate-100 rounded-xl">Batal</button>
+                        <button onclick="executeResetAllData()" class="px-4 py-2 text-xs font-semibold bg-rose-600 text-white rounded-xl">Ya, Hapus Semua</button>
+                    </div>
+                </div>
+            `);
+        }
+
+        async function executeResetAllData() {
+            AppState.exams = [];
+            AppState.results = [];
+            createDefaultExamIfEmpty();
+            await saveState();
+            closeModal();
+            navigate('dashboard');
+            showToast('Database Direset', 'Aplikasi kembali ke pengaturan awal.', 'warning');
+        }
+
+        // ============================================================================
+        // 14. BOOTSTRAP APLIKASI
+        // ============================================================================
+        window.addEventListener('DOMContentLoaded', async () => {
+            await loadState();
+            createDefaultExamIfEmpty();
+            updateHeaderAndBadges();
+            navigate('dashboard');
+        });
+    </script>
+</body>
+</html>
